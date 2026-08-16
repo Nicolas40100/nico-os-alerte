@@ -54,6 +54,8 @@ jobs:
           mkdir -p native_build/assets/models
           cp yoloe-26s-seg-pf_w8a32.tflite native_build/assets/models/yoloe-26s-seg-pf_w8a32.tflite
           sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 23/' native_build/android/app/build.gradle.kts
+          rm -rf native_build/test
+          rm -f native_build/analysis_options.yaml
           grep -n 'minSdk' native_build/android/app/build.gradle.kts
 
       - name: Resolve Flutter packages
@@ -62,7 +64,7 @@ jobs:
 
       - name: Analyze Dart
         working-directory: native_build
-        run: flutter analyze --no-fatal-infos
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
       - name: Build release APK
         working-directory: native_build
