@@ -1,0 +1,22 @@
+name: Test Nico Scouter Detection
+
+on:
+  push:
+    branches: [build-nico-scouter-v0]
+    paths:
+      - 'tests/**'
+      - '.github/workflows/test-detection.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Transformers.js
+        run: npm install @huggingface/transformers@3.8.1
+      - name: Test exact user shoe image
+        run: node tests/test_detection.mjs
