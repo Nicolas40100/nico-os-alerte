@@ -10,15 +10,18 @@ on:
 jobs:
   test-yoloe-pf:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install YOLOE runtime
+      - name: Install compatible YOLOE + LiteRT stack
         run: |
           python -m pip install --upgrade pip
-          pip install 'ultralytics>=8.4.83'
-      - name: Test YOLOE prompt-free on exact user shoe image
+          pip install torch==2.12.1 torchvision==0.27.1 --index-url https://download.pytorch.org/whl/cpu
+          pip install ultralytics==8.4.120
+          pip install litert-torch==0.9.3 ai-edge-litert==2.1.6
+          python -c "import torch, torchvision; print('torch', torch.__version__, 'torchvision', torchvision.__version__)"
+      - name: Test exact user shoe image through LiteRT export
         run: python tests/test_yoloe_pf.py
