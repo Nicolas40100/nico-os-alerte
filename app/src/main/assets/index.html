@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no"/>
-<title>Nico Scouter V0.2</title>
+<title>Nico Scouter V0.3</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}*{box-sizing:border-box}body{margin:0;background:#090b10;color:#fff;min-height:100vh}header{padding:16px 16px 8px;display:flex;align-items:center;justify-content:space-between}h1{font-size:20px;margin:0}.badge{font-size:12px;background:#202631;padding:6px 9px;border-radius:999px;color:#cfd8e6}main{padding:0 14px 18px}.search{display:grid;grid-template-columns:1fr 52px;gap:8px;margin:8px 0}input{width:100%;height:52px;border:1px solid #303746;border-radius:14px;background:#141821;color:#fff;padding:0 14px;font-size:16px;outline:none}button{border:0;border-radius:14px;background:#fff;color:#0b0d12;font-weight:800;font-size:15px;min-height:52px;padding:0 14px}button.secondary{background:#1b2130;color:#fff;border:1px solid #303746}.mic{font-size:23px;padding:0}.full{width:100%;margin-top:8px}.status{min-height:46px;padding:10px 4px 6px;color:#c6ceda;font-size:14px;line-height:1.35}.status strong{color:#fff}.progress{height:5px;background:#1a202b;border-radius:999px;overflow:hidden;margin:0 2px 10px}.progress>div{height:100%;width:0;background:#fff;transition:width .2s ease}.viewer{position:relative;width:100%;aspect-ratio:3/4;background:#111722;border-radius:18px;overflow:hidden;border:1px solid #252d3a}video,canvas.overlay{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}canvas.overlay{pointer-events:none}.controls{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}.result{margin-top:10px;background:#121722;border:1px solid #252d3a;border-radius:14px;padding:12px;min-height:48px}.found{font-weight:800}.hint{font-size:12px;color:#8f9bad;margin-top:8px;line-height:1.4}.pulse{animation:pulse .6s ease}@keyframes pulse{50%{box-shadow:0 0 0 4px rgba(255,255,255,.2)}}
 </style>
@@ -11,7 +11,7 @@
 <body>
 <header><h1>🔎 Nico Scouter</h1><span id="aiBadge" class="badge">IA : démarrage</span></header>
 <main>
-<div class="search"><input id="query" placeholder="chaussures blanches, bananier…" autocomplete="off"/><button id="mic" class="mic secondary">🎙️</button></div>
+<div class="search"><input id="query" placeholder="imprimante, chaussures blanches…" autocomplete="off"/><button id="mic" class="mic secondary">🎙️</button></div>
 <button id="go" class="full">CHERCHER</button>
 <div id="status" class="status">Démarrage…</div>
 <div class="progress"><div id="progressBar"></div></div>
@@ -29,11 +29,10 @@ env.useBrowserCache = true;
 let detector = null;
 let loading = false;
 async function ensureModel(){
-  if(detector) return;
-  if(loading) return;
+  if(detector || loading) return;
   loading = true;
   try{
-    detector = await pipeline('zero-shot-object-detection','Xenova/owlvit-base-patch32',{
+    detector = await pipeline('zero-shot-object-detection','onnx-community/grounding-dino-tiny-ONNX',{
       dtype:'q8',
       progress_callback:(info)=>self.postMessage({type:'model-progress',info})
     });
@@ -44,13 +43,17 @@ async function ensureModel(){
 }
 self.onmessage = async (event)=>{
   const m = event.data || {};
-  if(m.type === 'init') { await ensureModel(); return; }
-  if(m.type === 'detect') {
+  if(m.type === 'init'){ await ensureModel(); return; }
+  if(m.type === 'detect'){
     if(!detector){ self.postMessage({type:'detect-error',id:m.id,message:'IA pas encore prête'}); return; }
     try{
       const pixels = new Uint8ClampedArray(m.buffer);
       const image = new RawImage(pixels,m.width,m.height,4).rgb();
-      const out = await detector(image,m.labels,{top_k:16,threshold:0.06});
+      const prompts=(m.labels||[]).map(x=>{
+        let s=String(x||'').trim().toLowerCase().replace(/[.!?]+$/,'');
+        return s ? s+'.' : s;
+      }).filter(Boolean);
+      const out = await detector(image,prompts,{threshold:0.18});
       self.postMessage({type:'detections',id:m.id,width:m.width,height:m.height,detections:out});
     }catch(e){
       self.postMessage({type:'detect-error',id:m.id,message:(e&&e.message)||String(e)});
@@ -64,181 +67,32 @@ const $=id=>document.getElementById(id);
 const video=$('video'),overlay=$('overlay'),frame=$('frame'),query=$('query'),statusEl=$('status'),resultEl=$('result'),viewer=$('viewer'),cameraBtn=$('camera'),aiBadge=$('aiBadge'),progressBar=$('progressBar');
 let stream=null,modelReady=false,modelFailed=false,running=false,pendingSearch=false,detecting=false,searchPairs=[],generation=0,requestId=0,timer=null;
 const announced=new Map(),translationResolvers=new Map();
-
 function setStatus(t){statusEl.innerHTML=t;}
 function clearOverlay(){const c=overlay.getContext('2d');c.clearRect(0,0,overlay.width,overlay.height);}
 function normalizeVoice(t){return String(t||'').replace(/^\s*(cherche|trouve|trouver|je cherche|je veux trouver)\s+/i,'').trim();}
+function norm(t){return String(t||'').toLowerCase().trim().replace(/^[a-z]+\s+/,'').replace(/[.!?]+$/,'');}
 window.setSearchTerm=t=>{query.value=normalizeVoice(t);requestSearch();};
 window.onTranslation=(id,text,error)=>{const r=translationResolvers.get(id);if(!r)return;translationResolvers.delete(id);r({text,error});};
-
-function translateToEnglish(text){
-  return new Promise(resolve=>{
-    if(!window.Android?.translateToEnglish){resolve({text,error:'Traduction Android indisponible'});return;}
-    const id='t'+Date.now()+'_'+Math.random().toString(36).slice(2);
-    translationResolvers.set(id,resolve);
-    try{Android.translateToEnglish(id,text);}catch(e){translationResolvers.delete(id);resolve({text,error:String(e)});}
-    setTimeout(()=>{if(translationResolvers.has(id)){translationResolvers.delete(id);resolve({text,error:'Traduction trop longue'});}},20000);
-  });
-}
-
-async function ensureCamera(){
-  if(stream) return true;
-  try{
-    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:640},height:{ideal:480}},audio:false});
-    video.srcObject=stream;
-    await video.play();
-    cameraBtn.textContent='📷 Couper caméra';
-    return true;
-  }catch(e){
-    setStatus('❌ Autorise la caméra puis réessaie.');
-    if(window.Android?.requestCamera) Android.requestCamera();
-    return false;
-  }
-}
-
-function stopCamera(){
-  if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;}
-  cameraBtn.textContent='📷 Démarrer caméra';
-  clearOverlay();
-  if(running) setStatus('⏸ Recherche en pause : caméra coupée.');
-}
-
-async function toggleCamera(){
-  if(stream){stopCamera();return;}
-  const ok=await ensureCamera();
-  if(ok){setStatus(running?'🔎 Recherche reprise.':'📷 Caméra prête.');if(running)scheduleDetection(100);}
-}
-
+function translateToEnglish(text){return new Promise(resolve=>{if(!window.Android?.translateToEnglish){resolve({text,error:'Traduction Android indisponible'});return;}const id='t'+Date.now()+'_'+Math.random().toString(36).slice(2);translationResolvers.set(id,resolve);try{Android.translateToEnglish(id,text);}catch(e){translationResolvers.delete(id);resolve({text,error:String(e)});}setTimeout(()=>{if(translationResolvers.has(id)){translationResolvers.delete(id);resolve({text,error:'Traduction trop longue'});}},20000);});}
+async function ensureCamera(){if(stream)return true;try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},audio:false});video.srcObject=stream;await video.play();cameraBtn.textContent='📷 Couper caméra';return true;}catch(e){setStatus('❌ Autorise la caméra puis réessaie.');if(window.Android?.requestCamera)Android.requestCamera();return false;}}
+function stopCamera(){if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;}cameraBtn.textContent='📷 Démarrer caméra';clearOverlay();if(running)setStatus('⏸ Recherche en pause : caméra coupée.');}
+async function toggleCamera(){if(stream){stopCamera();return;}const ok=await ensureCamera();if(ok){setStatus(running?'🔎 Recherche reprise.':'📷 Caméra prête.');if(running)scheduleDetection(100);}}
 function parseLabels(){return query.value.split(/[,;\n]+/).map(x=>x.trim()).filter(Boolean).slice(0,10);}
-
-function fitCanvas(){
-  const r=video.getBoundingClientRect(),dpr=Math.max(1,window.devicePixelRatio||1);
-  overlay.width=Math.round(r.width*dpr);overlay.height=Math.round(r.height*dpr);
-  return{w:r.width,h:r.height,dpr};
-}
-
-function frenchLabelFor(english){
-  const exact=searchPairs.find(p=>p.en.toLowerCase()===String(english).toLowerCase());
-  return exact?exact.fr:english;
-}
-
-function drawDetections(ds,imageW,imageH){
-  const{w,h,dpr}=fitCanvas(),ctx=overlay.getContext('2d');
-  ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
-  const scale=Math.max(w/imageW,h/imageH),shownW=imageW*scale,shownH=imageH*scale,offX=(w-shownW)/2,offY=(h-shownH)/2;
-  ctx.lineWidth=4;ctx.font='700 16px system-ui';
-  for(const d of ds){
-    const x=d.box.xmin*scale+offX,y=d.box.ymin*scale+offY,bw=(d.box.xmax-d.box.xmin)*scale,bh=(d.box.ymax-d.box.ymin)*scale;
-    ctx.strokeStyle='#39ff88';ctx.fillStyle='rgba(0,0,0,.72)';ctx.strokeRect(x,y,bw,bh);
-    const label=frenchLabelFor(d.label),txt=label+' '+Math.round(d.score*100)+'%',tw=ctx.measureText(txt).width+14,ty=Math.max(22,y);
-    ctx.fillRect(x,ty-22,tw,24);ctx.fillStyle='#39ff88';ctx.fillText(txt,x+7,ty-5);
-  }
-}
-
-function beep(){
-  try{const ac=new(window.AudioContext||window.webkitAudioContext)(),osc=ac.createOscillator(),gain=ac.createGain();osc.frequency.value=880;gain.gain.value=.08;osc.connect(gain);gain.connect(ac.destination);osc.start();osc.stop(ac.currentTime+.13);}catch(_){ }
-}
-
-function announce(d){
-  const label=frenchLabelFor(d.label),last=announced.get(label)||0,now=Date.now();
-  if(now-last<3500)return;announced.set(label,now);beep();viewer.classList.remove('pulse');void viewer.offsetWidth;viewer.classList.add('pulse');
-  if(window.Android?.speak)Android.speak(label+' trouvé');
-}
-
-const workerCode=$('workerSource').textContent;
-const workerUrl=URL.createObjectURL(new Blob([workerCode],{type:'text/javascript'}));
-const aiWorker=new Worker(workerUrl,{type:'module'});
-URL.revokeObjectURL(workerUrl);
-
-function progressPercent(info){
-  if(!info)return null;
-  if(typeof info.progress==='number')return Math.max(0,Math.min(100,Math.round(info.progress)));
-  if(typeof info.loaded==='number'&&typeof info.total==='number'&&info.total>0)return Math.max(0,Math.min(100,Math.round(info.loaded/info.total*100)));
-  return null;
-}
-
-aiWorker.onmessage=(event)=>{
-  const m=event.data||{};
-  if(m.type==='model-progress'){
-    const p=progressPercent(m.info);
-    if(p!==null){aiBadge.textContent='IA : '+p+'%';progressBar.style.width=p+'%';}
-    else aiBadge.textContent='IA : chargement';
-    if(pendingSearch&&!running)setStatus('🧠 IA en cours de chargement'+(p!==null?' : <strong>'+p+'%</strong>':'…')+'<br>Tu peux appuyer sur STOP à tout moment.');
-    return;
-  }
-  if(m.type==='model-ready'){
-    modelReady=true;modelFailed=false;aiBadge.textContent='IA : prête';progressBar.style.width='100%';
-    if(pendingSearch)activateSearch();else setStatus(stream?'✅ IA et caméra prêtes.':'✅ IA prête. Démarre la caméra.');
-    return;
-  }
-  if(m.type==='model-error'){
-    modelFailed=true;modelReady=false;aiBadge.textContent='IA : erreur';setStatus('❌ Impossible de charger l’IA : '+m.message);return;
-  }
-  if(m.type==='detections'){
-    if(m.id!==requestId){return;}
-    detecting=false;
-    if(!running)return;
-    const good=(m.detections||[]).filter(x=>x.score>=0.06);
-    drawDetections(good,m.width,m.height);
-    if(good.length){const best=good[0],label=frenchLabelFor(best.label);resultEl.innerHTML='<span class="found">🟩 '+label+'</span> — '+Math.round(best.score*100)+'%';announce(best);}
-    else resultEl.textContent='🔍 Recherche : '+searchPairs.map(p=>p.fr).join(' · ');
-    scheduleDetection(650);
-    return;
-  }
-  if(m.type==='detect-error'){
-    if(m.id!==requestId)return;detecting=false;if(running){setStatus('⚠️ Erreur de détection : '+m.message);scheduleDetection(1200);}return;
-  }
-};
-aiWorker.onerror=(e)=>{modelFailed=true;aiBadge.textContent='IA : erreur';setStatus('❌ Le moteur IA n’a pas démarré. '+(e.message||''));};
-aiWorker.postMessage({type:'init'});
-
+function fitCanvas(){const r=video.getBoundingClientRect(),dpr=Math.max(1,window.devicePixelRatio||1);overlay.width=Math.round(r.width*dpr);overlay.height=Math.round(r.height*dpr);return{w:r.width,h:r.height,dpr};}
+function frenchLabelFor(english){const n=norm(english);const exact=searchPairs.find(p=>norm(p.en)===n || n.includes(norm(p.en)) || norm(p.en).includes(n));return exact?exact.fr:english;}
+function drawDetections(ds,imageW,imageH){const{w,h,dpr}=fitCanvas(),ctx=overlay.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);const scale=Math.max(w/imageW,h/imageH),shownW=imageW*scale,shownH=imageH*scale,offX=(w-shownW)/2,offY=(h-shownH)/2;ctx.lineWidth=4;ctx.font='700 16px system-ui';for(const d of ds){const x=d.box.xmin*scale+offX,y=d.box.ymin*scale+offY,bw=(d.box.xmax-d.box.xmin)*scale,bh=(d.box.ymax-d.box.ymin)*scale;ctx.strokeStyle='#39ff88';ctx.fillStyle='rgba(0,0,0,.72)';ctx.strokeRect(x,y,bw,bh);const label=frenchLabelFor(d.label),txt=label+' '+Math.round(d.score*100)+'%',tw=ctx.measureText(txt).width+14,ty=Math.max(22,y);ctx.fillRect(x,ty-22,tw,24);ctx.fillStyle='#39ff88';ctx.fillText(txt,x+7,ty-5);}}
+function beep(){try{const ac=new(window.AudioContext||window.webkitAudioContext)(),osc=ac.createOscillator(),gain=ac.createGain();osc.frequency.value=880;gain.gain.value=.08;osc.connect(gain);gain.connect(ac.destination);osc.start();osc.stop(ac.currentTime+.13);}catch(_){}}
+function announce(d){const label=frenchLabelFor(d.label),last=announced.get(label)||0,now=Date.now();if(now-last<3500)return;announced.set(label,now);beep();viewer.classList.remove('pulse');void viewer.offsetWidth;viewer.classList.add('pulse');if(window.Android?.speak)Android.speak(label+' trouvé');}
+const workerCode=$('workerSource').textContent;const workerUrl=URL.createObjectURL(new Blob([workerCode],{type:'text/javascript'}));const aiWorker=new Worker(workerUrl,{type:'module'});URL.revokeObjectURL(workerUrl);
+function progressPercent(info){if(!info)return null;if(typeof info.progress==='number')return Math.max(0,Math.min(100,Math.round(info.progress)));if(typeof info.loaded==='number'&&typeof info.total==='number'&&info.total>0)return Math.max(0,Math.min(100,Math.round(info.loaded/info.total*100)));return null;}
+aiWorker.onmessage=(event)=>{const m=event.data||{};if(m.type==='model-progress'){const p=progressPercent(m.info);if(p!==null){aiBadge.textContent='IA : '+p+'%';progressBar.style.width=p+'%';}else aiBadge.textContent='IA : chargement';if(pendingSearch&&!running)setStatus('🧠 IA Grounding DINO en cours de chargement'+(p!==null?' : <strong>'+p+'%</strong>':'…')+'<br>STOP reste disponible.');return;}if(m.type==='model-ready'){modelReady=true;modelFailed=false;aiBadge.textContent='IA : prête';progressBar.style.width='100%';if(pendingSearch)activateSearch();else setStatus(stream?'✅ IA et caméra prêtes.':'✅ IA prête. Démarre la caméra.');return;}if(m.type==='model-error'){modelFailed=true;modelReady=false;aiBadge.textContent='IA : erreur';setStatus('❌ Impossible de charger l’IA : '+m.message);return;}if(m.type==='detections'){if(m.id!==requestId)return;detecting=false;if(!running)return;const good=(m.detections||[]).filter(x=>x.score>=0.18);drawDetections(good,m.width,m.height);if(good.length){const best=good[0],label=frenchLabelFor(best.label);resultEl.innerHTML='<span class="found">🟩 '+label+'</span> — '+Math.round(best.score*100)+'%';announce(best);}else resultEl.textContent='🔍 Je cherche : '+searchPairs.map(p=>p.fr).join(' · ');scheduleDetection(700);return;}if(m.type==='detect-error'){if(m.id!==requestId)return;detecting=false;if(running){setStatus('⚠️ Erreur de détection : '+m.message);scheduleDetection(1200);}return;}};
+aiWorker.onerror=(e)=>{modelFailed=true;aiBadge.textContent='IA : erreur';setStatus('❌ Le moteur IA n’a pas démarré. '+(e.message||''));};aiWorker.postMessage({type:'init'});
 function scheduleDetection(delay){clearTimeout(timer);if(!running||!modelReady||!stream)return;timer=setTimeout(captureAndDetect,delay);}
-
-function captureAndDetect(){
-  if(!running||detecting||!modelReady||!stream||!video.videoWidth){scheduleDetection(300);return;}
-  detecting=true;
-  const maxW=448,scale=Math.min(1,maxW/video.videoWidth),w=Math.round(video.videoWidth*scale),h=Math.round(video.videoHeight*scale);
-  frame.width=w;frame.height=h;const ctx=frame.getContext('2d',{willReadFrequently:true});ctx.drawImage(video,0,0,w,h);
-  const data=ctx.getImageData(0,0,w,h);requestId++;
-  aiWorker.postMessage({type:'detect',id:requestId,width:w,height:h,labels:searchPairs.map(p=>p.en),buffer:data.data.buffer},[data.data.buffer]);
-}
-
-async function requestSearch(){
-  const originals=parseLabels();
-  if(!originals.length){setStatus('Écris ou dis ce que tu cherches.');return;}
-  const myGen=++generation;running=false;pendingSearch=true;clearTimeout(timer);clearOverlay();announced.clear();query.value=originals.join(', ');resultEl.textContent='Préparation de la recherche…';
-  const cameraOk=await ensureCamera();if(myGen!==generation||!pendingSearch)return;if(!cameraOk)return;
-  setStatus(modelReady?'🌍 Traduction de la recherche…':'🧠 Chargement de l’IA en arrière-plan…');
-  const translated=await Promise.all(originals.map(x=>translateToEnglish(x)));
-  if(myGen!==generation||!pendingSearch)return;
-  searchPairs=originals.map((fr,i)=>({fr,en:(translated[i].text||fr).trim()}));
-  const failures=translated.filter(x=>x.error).length;
-  if(failures)console.warn('Traduction partielle',translated);
-  activateSearch();
-}
-
-function activateSearch(){
-  if(!pendingSearch||!searchPairs.length)return;
-  if(!modelReady){if(modelFailed)setStatus('❌ IA indisponible. Vérifie Internet puis relance l’application.');else setStatus('🧠 IA en cours de chargement…<br><strong>STOP fonctionne pendant l’attente.</strong>');return;}
-  if(!stream){setStatus('⏸ Recherche prête, mais caméra coupée.');return;}
-  pendingSearch=false;running=true;detecting=false;
-  const detail=searchPairs.map(p=>p.fr+(p.fr.toLowerCase()!==p.en.toLowerCase()?' → '+p.en:'')).join(' · ');
-  setStatus('🔎 Recherche active : <strong>'+detail+'</strong>');resultEl.textContent='🔍 Je regarde…';scheduleDetection(50);
-}
-
-function stopSearch(){
-  generation++;pendingSearch=false;running=false;detecting=false;requestId++;clearTimeout(timer);timer=null;clearOverlay();announced.clear();
-  setStatus('⏹ Recherche arrêtée.');resultEl.textContent='Aucune recherche active.';
-}
-
-$('go').addEventListener('click',requestSearch);
-cameraBtn.addEventListener('click',toggleCamera);
-$('stop').addEventListener('click',stopSearch);
-$('mic').addEventListener('click',()=>{if(window.Android?.startVoice)Android.startVoice();});
-query.addEventListener('keydown',e=>{if(e.key==='Enter')requestSearch();});
-window.addEventListener('resize',fitCanvas);
-
-ensureCamera().then(ok=>{if(ok&&!modelReady)setStatus('📷 Caméra prête. L’IA se charge en arrière-plan…');});
+function captureAndDetect(){if(!running||detecting||!modelReady||!stream||!video.videoWidth){scheduleDetection(300);return;}detecting=true;const maxW=640,scale=Math.min(1,maxW/video.videoWidth),w=Math.round(video.videoWidth*scale),h=Math.round(video.videoHeight*scale);frame.width=w;frame.height=h;const ctx=frame.getContext('2d',{willReadFrequently:true});ctx.drawImage(video,0,0,w,h);const data=ctx.getImageData(0,0,w,h);requestId++;aiWorker.postMessage({type:'detect',id:requestId,width:w,height:h,labels:searchPairs.map(p=>p.en),buffer:data.data.buffer},[data.data.buffer]);}
+async function requestSearch(){const originals=parseLabels();if(!originals.length){setStatus('Écris ou dis ce que tu cherches.');return;}const myGen=++generation;running=false;pendingSearch=true;clearTimeout(timer);clearOverlay();announced.clear();query.value=originals.join(', ');resultEl.textContent='Préparation de la recherche…';const cameraOk=await ensureCamera();if(myGen!==generation||!pendingSearch)return;if(!cameraOk)return;setStatus(modelReady?'🌍 Traduction de la recherche…':'🧠 Chargement de la nouvelle IA en arrière-plan…');const translated=await Promise.all(originals.map(x=>translateToEnglish(x)));if(myGen!==generation||!pendingSearch)return;searchPairs=originals.map((fr,i)=>({fr,en:(translated[i].text||fr).trim()}));activateSearch();}
+function activateSearch(){if(!pendingSearch||!searchPairs.length)return;if(!modelReady){if(modelFailed)setStatus('❌ IA indisponible. Vérifie Internet puis relance l’application.');else setStatus('🧠 Nouvelle IA en cours de chargement…<br><strong>STOP fonctionne pendant l’attente.</strong>');return;}if(!stream){setStatus('⏸ Recherche prête, mais caméra coupée.');return;}pendingSearch=false;running=true;detecting=false;const detail=searchPairs.map(p=>p.fr+(p.fr.toLowerCase()!==p.en.toLowerCase()?' → '+p.en:'')).join(' · ');setStatus('🔎 Recherche active : <strong>'+detail+'</strong>');resultEl.textContent='🔍 Je regarde…';scheduleDetection(50);}
+function stopSearch(){generation++;pendingSearch=false;running=false;detecting=false;requestId++;clearTimeout(timer);timer=null;clearOverlay();announced.clear();setStatus('⏹ Recherche arrêtée.');resultEl.textContent='Aucune recherche active.';}
+$('go').addEventListener('click',requestSearch);cameraBtn.addEventListener('click',toggleCamera);$('stop').addEventListener('click',stopSearch);$('mic').addEventListener('click',()=>{if(window.Android?.startVoice)Android.startVoice();});query.addEventListener('keydown',e=>{if(e.key==='Enter')requestSearch();});window.addEventListener('resize',fitCanvas);ensureCamera().then(ok=>{if(ok&&!modelReady)setStatus('📷 Caméra prête. La nouvelle IA se charge en arrière-plan…');});
 </script>
 </body>
 </html>
