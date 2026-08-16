@@ -54,9 +54,19 @@ jobs:
           mkdir -p native_build/assets/models
           cp yoloe-26s-seg-pf_w8a32.tflite native_build/assets/models/yoloe-26s-seg-pf_w8a32.tflite
           sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 23/' native_build/android/app/build.gradle.kts
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('native_build/lib/main.dart')
+          s = p.read_text()
+          s = s.replace('bool _cameraEnabled = true;', 'bool _cameraEnabled = false;')
+          s = s.replace("String _status = 'Chargement du moteur natif…';", "String _status = '✅ Application prête. Appuie sur CAMÉRA pour lancer l’IA.';")
+          s = s.replace('useGpu: true,', 'useGpu: false,')
+          s = s.replace('    _initSpeech();\n    _initTts();\n', '')
+          p.write_text(s)
+          PY
           rm -rf native_build/test
           rm -f native_build/analysis_options.yaml
-          grep -n 'minSdk' native_build/android/app/build.gradle.kts
+          grep -n 'minSdk\|_cameraEnabled\|useGpu' native_build/android/app/build.gradle.kts native_build/lib/main.dart | head -20
 
       - name: Resolve Flutter packages
         working-directory: native_build
@@ -71,10 +81,10 @@ jobs:
         run: flutter build apk --release
 
       - name: Prepare APK
-        run: cp native_build/build/app/outputs/flutter-apk/app-release.apk NicoScouter-Native-V0.5.apk
+        run: cp native_build/build/app/outputs/flutter-apk/app-release.apk NicoScouter-Native-V0.6-Safe.apk
 
       - uses: actions/upload-artifact@v4
         with:
-          name: NicoScouter-Native-V0.5
-          path: NicoScouter-Native-V0.5.apk
+          name: NicoScouter-Native-V0.6-Safe
+          path: NicoScouter-Native-V0.6-Safe.apk
           if-no-files-found: error
