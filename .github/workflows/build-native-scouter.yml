@@ -1,0 +1,78 @@
+name: Build Nico Scouter Native APK
+
+on:
+  push:
+    branches: [build-nico-scouter-v0]
+    paths:
+      - 'native_src/**'
+      - 'tests/test_yoloe_pf.py'
+      - 'tests/shoes_test_640.b64'
+      - '.github/workflows/build-native-scouter.yml'
+  workflow_dispatch:
+
+jobs:
+  build-native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install validated LiteRT export stack
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch==2.12.1 torchvision==0.27.1 --index-url https://download.pytorch.org/whl/cpu
+          pip install ultralytics==8.4.120
+          pip install litert-torch==0.9.3 ai-edge-litert==2.1.6
+
+      - name: Export and verify exact mobile model
+        run: |
+          python tests/test_yoloe_pf.py
+          test -f yoloe-26s-seg-pf_w8a32.tflite
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Create native Flutter Android project
+        run: |
+          flutter --version
+          rm -rf native_build
+          flutter create --platforms=android --org fr.nico --project-name nico_scouter_native native_build
+          cp native_src/pubspec.yaml native_build/pubspec.yaml
+          cp native_src/main.dart native_build/lib/main.dart
+          cp native_src/AndroidManifest.xml native_build/android/app/src/main/AndroidManifest.xml
+          mkdir -p native_build/assets/models
+          cp yoloe-26s-seg-pf_w8a32.tflite native_build/assets/models/yoloe-26s-seg-pf_w8a32.tflite
+          sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 23/' native_build/android/app/build.gradle.kts
+          grep -n 'minSdk' native_build/android/app/build.gradle.kts
+
+      - name: Resolve Flutter packages
+        working-directory: native_build
+        run: flutter pub get
+
+      - name: Analyze Dart
+        working-directory: native_build
+        run: flutter analyze --no-fatal-infos
+
+      - name: Build release APK
+        working-directory: native_build
+        run: flutter build apk --release
+
+      - name: Prepare APK
+        run: cp native_build/build/app/outputs/flutter-apk/app-release.apk NicoScouter-Native-V0.5.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NicoScouter-Native-V0.5
+          path: NicoScouter-Native-V0.5.apk
+          if-no-files-found: error
