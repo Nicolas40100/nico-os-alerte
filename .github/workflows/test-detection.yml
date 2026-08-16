@@ -8,15 +8,17 @@ on:
       - '.github/workflows/test-detection.yml'
 
 jobs:
-  test:
+  test-yoloe-pf:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-python@v5
         with:
-          node-version: '22'
-      - name: Install Transformers.js
-        run: npm install @huggingface/transformers@3.8.1
-      - name: Test exact user shoe image
-        run: node tests/test_detection.mjs
+          python-version: '3.12'
+      - name: Install YOLOE runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install 'ultralytics>=8.4.83'
+      - name: Test YOLOE prompt-free on exact user shoe image
+        run: python tests/test_yoloe_pf.py
