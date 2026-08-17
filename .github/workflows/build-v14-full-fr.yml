@@ -46,8 +46,10 @@ jobs:
           rows=Path('direct_native/app/src/main/assets/labels_fr.tsv').read_text(encoding='utf-8').splitlines()
           assert len(rows)==4585, len(rows)
           data='\n'.join(rows).lower()
-          for expected in ('printer\timprimante','radiator\tradiateur','stapler\t','watering can\t','game console\t'):
+          for expected in ('printer\timprimante','radiator\tradiateur','stapler\t','watering can\t','video game\t','wii\t'):
               assert expected in data, expected
+          assert any(line.lower().startswith('video game\t') and 'console' in line.lower() for line in rows)
+          assert any(line.lower().startswith('wii\t') and 'console' in line.lower() for line in rows)
           print('French vocabulary rows:',len(rows))
           PY
 
@@ -71,6 +73,7 @@ jobs:
           assert 'frenchRows >= 4500' in detector
           assert 'installFrenchVocabulary' in search
           assert 'lookupFullFrenchVocabulary' in search
+          assert '"console" to setOf("video game", "Wii")' in search
           assert '.take(30)' not in detector
           assert 'targetCandidateMinScore = 0.04f' in main
           assert 'immediateTargetMinScore = 0.10f' in main
@@ -112,6 +115,7 @@ jobs:
               joined='\n'.join(fr).lower()
               assert 'printer\timprimante' in joined
               assert 'radiator\tradiateur' in joined
+              assert any(line.startswith('video game\t') and 'console' in line for line in [x.lower() for x in fr])
               dex=b''.join(z.read(n) for n in names if n.startswith('classes') and n.endswith('.dex'))
               assert b'Nico Scouter DIRECT V1.4 FR' in dex
               assert b'LOCK' in dex
