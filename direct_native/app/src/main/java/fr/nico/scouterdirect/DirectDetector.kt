@@ -93,7 +93,7 @@ class DirectDetector(private val context: Context) : AutoCloseable {
         val det = outputs[detOutputIndex].readFloat()
         val anchors = detShape[1]
         val fields = detShape[2]
-        val out = ArrayList<Detection>(32)
+        val out = ArrayList<Detection>(anchors)
         for (a in 0 until anchors) {
             val o = a * fields
             if (o + 5 >= det.size) break
@@ -108,7 +108,11 @@ class DirectDetector(private val context: Context) : AutoCloseable {
             if (x2 <= x1 || y2 <= y1) continue
             out += Detection(cls, labels[cls], score, RectF(x1, y1, x2, y2))
         }
-        return out.sortedByDescending { it.score }.take(30)
+
+        // V1.3: keep every valid model candidate (up to the model's 300 outputs).
+        // Free-scan UI still displays only its usual top items; target search can now inspect
+        // low-ranked candidates that V1.2 used to discard after the first 30.
+        return out.sortedByDescending { it.score }
     }
 
     override fun close() {
