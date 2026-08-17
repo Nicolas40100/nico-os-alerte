@@ -62,7 +62,7 @@ object SearchLogic {
         "enceinte" to setOf("speaker", "loudspeaker"), "radio" to setOf("radio"),
         "tele" to setOf("television", "tv"), "television" to setOf("television", "tv"),
         "appareil photo" to setOf("camera", "digital camera"), "camera" to setOf("camera"),
-        "console" to setOf("game console", "console"), "manette" to setOf("game controller", "controller", "gamepad"),
+        "console" to setOf("video game", "Wii"), "manette" to setOf("game controller", "controller", "gamepad"),
         "chargeur" to setOf("charger", "power adapter"), "cable" to setOf("cable", "cord"),
         "lunettes" to setOf("glasses", "eyeglasses", "sunglasses"), "montre" to setOf("watch"),
         "bague" to setOf("ring"), "bracelet" to setOf("bracelet"), "collier" to setOf("necklace"),
