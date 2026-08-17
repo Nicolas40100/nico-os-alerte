@@ -1,3 +1,5 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -11,8 +13,8 @@ android {
         applicationId = "fr.nico.scouterdirect"
         minSdk = 23
         targetSdk = 35
-        versionCode = 11
-        versionName = "1.1-direct"
+        versionCode = 12
+        versionName = "1.2-direct"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
 
@@ -25,9 +27,14 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
 
     androidResources { noCompress += "tflite" }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
+    }
 }
 
 dependencies {
@@ -39,8 +46,6 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.4.2")
     implementation("androidx.camera:camera-view:1.4.2")
     implementation("com.google.ai.edge.litert:litert:2.1.5") {
-        // We bundle the model locally. Play AI Delivery is only for downloadable AI packs
-        // and pulls WorkManager/Room, which caused the previous startup crash.
         exclude(group = "com.google.android.play", module = "ai-delivery")
     }
 }
