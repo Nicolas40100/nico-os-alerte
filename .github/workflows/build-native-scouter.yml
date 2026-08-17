@@ -1,4 +1,4 @@
-name: Build Nico Scouter Native APK
+name: Build Nico Scouter Clean APK
 
 on:
   push:
@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-native:
+  build-clean:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -28,7 +28,7 @@ jobs:
           pip install ultralytics==8.4.120
           pip install litert-torch==0.9.3 ai-edge-litert==2.1.6
 
-      - name: Export and verify exact mobile model
+      - name: Export and verify mobile model
         run: |
           python tests/test_yoloe_pf.py
           test -f yoloe-26s-seg-pf_w8a32.tflite
@@ -43,30 +43,18 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Create native Flutter Android project
+      - name: Create clean Flutter Android project
         run: |
-          flutter --version
           rm -rf native_build
-          flutter create --platforms=android --org fr.nico --project-name nico_scouter_native native_build
+          flutter create --platforms=android --org fr.nico.clean --project-name nico_scouter_clean native_build
           cp native_src/pubspec.yaml native_build/pubspec.yaml
           cp native_src/main.dart native_build/lib/main.dart
           cp native_src/AndroidManifest.xml native_build/android/app/src/main/AndroidManifest.xml
           mkdir -p native_build/assets/models
           cp yoloe-26s-seg-pf_w8a32.tflite native_build/assets/models/yoloe-26s-seg-pf_w8a32.tflite
           sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 23/' native_build/android/app/build.gradle.kts
-          python - <<'PY'
-          from pathlib import Path
-          p = Path('native_build/lib/main.dart')
-          s = p.read_text()
-          s = s.replace('bool _cameraEnabled = true;', 'bool _cameraEnabled = false;')
-          s = s.replace("String _status = 'Chargement du moteur natif…';", "String _status = '✅ Application prête. Appuie sur CAMÉRA pour lancer l’IA.';")
-          s = s.replace('useGpu: true,', 'useGpu: false,')
-          s = s.replace('    _initSpeech();\n    _initTts();\n', '')
-          p.write_text(s)
-          PY
           rm -rf native_build/test
           rm -f native_build/analysis_options.yaml
-          grep -n 'minSdk\|_cameraEnabled\|useGpu' native_build/android/app/build.gradle.kts native_build/lib/main.dart | head -20
 
       - name: Resolve Flutter packages
         working-directory: native_build
@@ -76,15 +64,28 @@ jobs:
         working-directory: native_build
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
-      - name: Build release APK
+      - name: Build ARM64 release APK only
         working-directory: native_build
-        run: flutter build apk --release
+        run: flutter build apk --release --split-per-abi
 
-      - name: Prepare APK
-        run: cp native_build/build/app/outputs/flutter-apk/app-release.apk NicoScouter-Native-V0.6-Safe.apk
+      - name: Prepare and verify clean APK
+        run: |
+          cp native_build/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk NicoScouter-Clean-V0.7-arm64.apk
+          echo 'APK size:'
+          ls -lh NicoScouter-Clean-V0.7-arm64.apk
+          echo 'Native libraries:'
+          unzip -l NicoScouter-Clean-V0.7-arm64.apk | grep ' lib/' | head -40
+          if unzip -l NicoScouter-Clean-V0.7-arm64.apk | grep -qE 'lib/(x86|x86_64|armeabi-v7a)/'; then
+            echo 'Unexpected non-arm64 native library found'
+            exit 1
+          fi
+          if unzip -l NicoScouter-Clean-V0.7-arm64.apk | grep -q 'libtranslate_jni.so'; then
+            echo 'Unexpected ML Kit translation library found'
+            exit 1
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
-          name: NicoScouter-Native-V0.6-Safe
-          path: NicoScouter-Native-V0.6-Safe.apk
+          name: NicoScouter-Clean-V0.7-arm64
+          path: NicoScouter-Clean-V0.7-arm64.apk
           if-no-files-found: error
