@@ -1,0 +1,2 @@
+Nico Scouter DIRECT V1.2 audited build trigger.
+Stable V1 engine preserved; target lock/search fixes are source-native, not CI patches.
