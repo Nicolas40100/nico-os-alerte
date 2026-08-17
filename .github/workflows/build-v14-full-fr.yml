@@ -39,7 +39,7 @@ jobs:
 
       - name: Generate complete French vocabulary offline
         run: |
-          pip install argostranslate==1.11.1
+          pip install argostranslate==1.11.0
           python tools/generate_fr_vocab.py
           python - <<'PY'
           from pathlib import Path
