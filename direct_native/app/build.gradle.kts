@@ -10,11 +10,11 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "fr.nico.scouterdirect.v12audit"
+        applicationId = "fr.nico.scouterdirect.v13recall"
         minSdk = 23
         targetSdk = 35
-        versionCode = 13
-        versionName = "1.2-audit-fix"
+        versionCode = 14
+        versionName = "1.3-recall"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
 
