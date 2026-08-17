@@ -48,6 +48,7 @@ jobs:
           data='\n'.join(rows).lower()
           for expected in ('printer\timprimante','radiator\tradiateur','stapler\t','watering can\t','video game\t','wii\t'):
               assert expected in data, expected
+          assert any(line.lower().startswith('watering can\t') and 'arrosoir' in line.lower() for line in rows)
           assert any(line.lower().startswith('video game\t') and 'console' in line.lower() for line in rows)
           assert any(line.lower().startswith('wii\t') and 'console' in line.lower() for line in rows)
           print('French vocabulary rows:',len(rows))
@@ -115,6 +116,7 @@ jobs:
               joined='\n'.join(fr).lower()
               assert 'printer\timprimante' in joined
               assert 'radiator\tradiateur' in joined
+              assert any(line.startswith('watering can\t') and 'arrosoir' in line for line in [x.lower() for x in fr])
               assert any(line.startswith('video game\t') and 'console' in line for line in [x.lower() for x in fr])
               dex=b''.join(z.read(n) for n in names if n.startswith('classes') and n.endswith('.dex'))
               assert b'Nico Scouter DIRECT V1.4 FR' in dex
