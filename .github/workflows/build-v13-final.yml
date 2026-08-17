@@ -1,0 +1,100 @@
+name: Nico Scouter V1.3 RECALL
+on:
+  push:
+    branches: [build-nico-scouter-v1.3-recall]
+    paths: ['direct_native/**', 'tests/**', '.github/workflows/build-v13-final.yml']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+
+      - name: Verify and export exact model
+        run: |
+          pip install torch==2.12.1 torchvision==0.27.1 --index-url https://download.pytorch.org/whl/cpu
+          pip install ultralytics==8.4.120 litert-torch==0.9.3 ai-edge-litert==2.1.6
+          python tests/test_yoloe_pf.py
+
+      - name: Prepare Android assets
+        run: |
+          mkdir -p direct_native/app/src/main/assets
+          cp yoloe-26s-seg-pf_w8a32.tflite direct_native/app/src/main/assets/
+          python - <<'PY'
+          import base64,json,zipfile
+          from pathlib import Path
+          with zipfile.ZipFile('yoloe-26s-seg-pf_w8a32.tflite') as z: m=json.loads(z.read('metadata.json'))
+          n=m['names']; labels=[n[str(i)] if str(i) in n else n[i] for i in range(len(n))]
+          assert len(labels) == 4585
+          for required in ('printer','radiator','toolbox','sock','dog','rabbit'):
+              assert required in labels, required
+          Path('direct_native/app/src/main/assets/labels.txt').write_text('\n'.join(labels),encoding='utf-8')
+          Path('direct_native/app/src/main/assets/shoes_test.jpg').write_bytes(base64.b64decode(Path('tests/shoes_test_640.b64').read_text().strip()))
+          print('labels',len(labels),'required target labels: PASS')
+          PY
+
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: '17'}
+
+      - uses: gradle/actions/setup-gradle@v4
+        with: {gradle-version: '8.13'}
+
+      - name: Verify V1.3 source invariants
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          detector=Path('direct_native/app/src/main/java/fr/nico/scouterdirect/DirectDetector.kt').read_text()
+          main=Path('direct_native/app/src/main/java/fr/nico/scouterdirect/MainActivity.kt').read_text()
+          search=Path('direct_native/app/src/main/java/fr/nico/scouterdirect/SearchLogic.kt').read_text()
+          assert '.take(30)' not in detector
+          assert 'return out.sortedByDescending { it.score }' in detector
+          assert 'targetCandidateMinScore = 0.04f' in main
+          assert 'immediateTargetMinScore = 0.10f' in main
+          assert 'TargetConfirmationTracker' in main
+          assert 'confirmation.confirmed' in main
+          assert '"radiateur" to setOf("radiator", "heater")' in search
+          assert '"caisse a outils" to setOf("toolbox", "tool box", "tool chest")' in search
+          print('V1.3 recall invariants: PASS')
+          PY
+
+      - name: Run target and confirmation unit tests
+        working-directory: direct_native
+        run: gradle :app:testDebugUnitTest --stacktrace
+
+      - name: Guard dependencies
+        working-directory: direct_native
+        run: |
+          gradle :app:dependencies --configuration debugRuntimeClasspath > /tmp/deps
+          ! grep -q 'androidx.work:work-runtime' /tmp/deps
+          ! grep -qi 'flutter' /tmp/deps
+
+      - name: Build APK
+        working-directory: direct_native
+        run: gradle :app:assembleDebug --stacktrace
+
+      - name: Verify APK
+        run: |
+          APK=NicoScouter-DIRECT-V1.3-RECALL.apk
+          cp direct_native/app/build/outputs/apk/debug/app-debug.apk "$APK"
+          unzip -t "$APK" >/dev/null
+          ! unzip -l "$APK" | grep -qE 'lib/(x86|x86_64|armeabi-v7a)/'
+          unzip -l "$APK" | grep -Fq 'assets/yoloe-26s-seg-pf_w8a32.tflite'
+          unzip -l "$APK" | grep -Fq 'assets/labels.txt'
+          rm -f /tmp/dexstrings
+          for d in $(unzip -Z1 "$APK" | grep -E '^classes([0-9]+)?\.dex$'); do unzip -p "$APK" "$d" | strings >> /tmp/dexstrings; done
+          grep -Fq 'Nico Scouter DIRECT V1.3' /tmp/dexstrings
+          grep -Fq 'LOCK' /tmp/dexstrings
+          grep -Fq 'Vérification' /tmp/dexstrings
+          sha256sum "$APK"
+          ls -lh "$APK"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NicoScouter-DIRECT-V1.3-RECALL
+          path: NicoScouter-DIRECT-V1.3-RECALL.apk
+          if-no-files-found: error
