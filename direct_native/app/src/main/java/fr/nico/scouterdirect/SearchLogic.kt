@@ -10,6 +10,16 @@ data class SearchSpec(
 )
 
 object SearchLogic {
+    @Volatile private var fullFrenchIndex: Map<String, Set<String>> = emptyMap()
+
+    private val frenchStopWords = setOf(
+        "un", "une", "le", "la", "les", "l", "des", "du", "de", "d",
+        "mon", "ma", "mes", "ton", "ta", "tes", "son", "sa", "ses",
+        "ce", "cet", "cette", "ces", "en"
+    )
+
+    // Human aliases remain only for colloquial/synonym forms. V1.4 no longer depends on this
+    // hand-written list for ordinary object names: labels_fr.tsv covers the complete model vocab.
     private val aliases: Map<String, Set<String>> = mapOf(
         "chaussure" to setOf("shoe", "sneaker", "trainer", "footwear"),
         "chaussures" to setOf("shoe", "sneaker", "trainer", "footwear"),
@@ -78,6 +88,39 @@ object SearchLogic {
         "serviette" to setOf("towel"), "statue" to setOf("statue"), "sculpture" to setOf("sculpture"),
     )
 
+    fun installFrenchVocabulary(lines: Sequence<String>): Int {
+        val mutable = linkedMapOf<String, MutableSet<String>>()
+        var rows = 0
+        lines.forEach { rawLine ->
+            val line = rawLine.trim()
+            if (line.isEmpty() || line.startsWith("#")) return@forEach
+            val parts = line.split('\t', limit = 2)
+            if (parts.size != 2) return@forEach
+            val english = canonical(parts[0])
+            if (english.isBlank()) return@forEach
+            val frenchForms = parts[1].split('|').map(::normalize).filter { it.isNotBlank() }
+            if (frenchForms.isEmpty()) return@forEach
+            rows++
+            for (form in frenchForms) {
+                addVocabularyKey(mutable, form, english)
+                val simplified = simplifyFrench(form)
+                if (simplified.isNotBlank()) addVocabularyKey(mutable, simplified, english)
+            }
+        }
+        fullFrenchIndex = mutable.mapValues { it.value.toSet() }
+        return rows
+    }
+
+    fun installedFrenchVocabularyKeys(): Int = fullFrenchIndex.size
+
+    private fun addVocabularyKey(
+        target: MutableMap<String, MutableSet<String>>,
+        key: String,
+        english: String,
+    ) {
+        target.getOrPut(key) { linkedSetOf() }.add(english)
+    }
+
     fun buildSpec(token: Long, raw: String): SearchSpec? {
         val display = raw.trim()
         if (display.isEmpty()) return null
@@ -85,19 +128,67 @@ object SearchLogic {
         val candidates = linkedSetOf<String>()
 
         aliases[normalized]?.let { candidates += it }
-        if (candidates.isEmpty()) {
-            for (word in normalized.split(' ')) {
-                aliases[word]?.let {
-                    candidates += it
-                    break
-                }
-            }
+        candidates += lookupFullFrenchVocabulary(normalized)
+
+        val simplified = simplifyFrench(normalized)
+        if (simplified != normalized) {
+            aliases[simplified]?.let { candidates += it }
+            candidates += lookupFullFrenchVocabulary(simplified)
         }
 
-        // English input keeps working, and an unknown French word is never silently discarded.
+        // Colloquial aliases still help descriptive phrases such as "mes baskets blanches".
+        for (word in normalized.split(' ')) {
+            aliases[word]?.let { candidates += it }
+        }
+
+        // English input keeps working, and an unknown word is never silently discarded.
         candidates += canonical(normalized)
         return SearchSpec(token = token, display = display, candidates = candidates.map(::canonical).toSet())
     }
+
+    private fun lookupFullFrenchVocabulary(query: String): Set<String> {
+        val index = fullFrenchIndex
+        if (index.isEmpty()) return emptySet()
+
+        index[query]?.let { return it }
+
+        val queryTokens = simplifyFrench(query).split(' ').filter { it.isNotBlank() }.toSet()
+        if (queryTokens.isEmpty()) return emptySet()
+
+        var bestTokenCount = 0
+        val matches = linkedSetOf<String>()
+        for ((key, englishLabels) in index) {
+            val keyTokens = key.split(' ').filter { it.isNotBlank() }.toSet()
+            if (keyTokens.isEmpty() || keyTokens.size > queryTokens.size) continue
+            val tokenMatch = keyTokens.all { keyToken ->
+                queryTokens.any { queryToken -> frenchTokenEquivalent(queryToken, keyToken) }
+            }
+            if (!tokenMatch) continue
+            if (keyTokens.size > bestTokenCount) {
+                bestTokenCount = keyTokens.size
+                matches.clear()
+            }
+            if (keyTokens.size == bestTokenCount) matches += englishLabels
+        }
+        return matches
+    }
+
+    private fun frenchTokenEquivalent(a: String, b: String): Boolean {
+        if (a == b) return true
+        return frenchStem(a) == frenchStem(b)
+    }
+
+    private fun frenchStem(token: String): String = when {
+        token.length > 4 && token.endsWith("es") -> token.dropLast(2)
+        token.length > 4 && token.endsWith("s") -> token.dropLast(1)
+        token.length > 4 && token.endsWith("x") -> token.dropLast(1)
+        else -> token
+    }
+
+    private fun simplifyFrench(value: String): String = normalize(value)
+        .split(' ')
+        .filter { it.isNotBlank() && it !in frenchStopWords }
+        .joinToString(" ")
 
     fun matches(label: String, spec: SearchSpec): Boolean {
         val labelCanonical = canonical(label)
