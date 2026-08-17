@@ -10,11 +10,11 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "fr.nico.scouterdirect"
+        applicationId = "fr.nico.scouterdirect.v12audit"
         minSdk = 23
         targetSdk = 35
-        versionCode = 12
-        versionName = "1.2-direct"
+        versionCode = 13
+        versionName = "1.2-audit-fix"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
 
@@ -48,4 +48,6 @@ dependencies {
     implementation("com.google.ai.edge.litert:litert:2.1.5") {
         exclude(group = "com.google.android.play", module = "ai-delivery")
     }
+
+    testImplementation("junit:junit:4.13.2")
 }
