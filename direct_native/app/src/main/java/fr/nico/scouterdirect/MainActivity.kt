@@ -105,7 +105,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 val shoe = test.firstOrNull { SearchLogic.canonical(it.label) == "shoe" }
                 runOnUiThread {
                     selfTestText.text = if (shoe != null) {
-                        "✅ Autotest : SHOE détecté ${(shoe.score * 100).toInt()} %"
+                        "✅ Autotest : SHOE détecté ${(shoe.score * 100).toInt()} % • FR complet chargé"
                     } else {
                         "❌ Autotest : chaussure non détectée"
                     }
@@ -129,7 +129,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         val title = TextView(this).apply {
-            text = "🔎 Nico Scouter DIRECT V1.3"
+            text = "🔎 Nico Scouter DIRECT V1.4 FR"
             textSize = 22f
             setTextColor(0xFFFFFFFF.toInt())
             setPadding(0, 0, 0, 10)
@@ -250,8 +250,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             val srcH = bitmap.height
             val visible = detections.take(8)
 
-            // Detection remains prompt-free. V1.3 searches every returned model candidate rather
-            // than only V1.2's top 30, while keeping the free-scan display unchanged.
             val search = currentSearch
             val candidate = search?.let { spec ->
                 detections.firstOrNull {
@@ -265,8 +263,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 detectedAt,
             )
 
-            // Preserve V1.2 responsiveness for a confident target (>=10%). A weaker target
-            // (4–9.9%) must appear coherently on two close frames before it can trigger LOCK.
             val bestMatch = when {
                 candidate == null -> null
                 candidate.score >= immediateTargetMinScore -> candidate
@@ -302,7 +298,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     "IA voit : " + visible.joinToString(" • ") { "${it.label} ${(it.score * 100).toInt()}%" }
                 }
 
-                // Never let a completed old UI callback paint over a newer search.
                 if (currentSearch?.token != search?.token) {
                     overlay.update(detections, srcW, srcH, null, "", 0L)
                 } else {
