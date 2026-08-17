@@ -1,8 +1,8 @@
-name: Build Nico Scouter DIRECT Native V1
+name: Build Nico Scouter DIRECT Native V1.1
 
 on:
   push:
-    branches: [build-nico-scouter-v0]
+    branches: [build-nico-scouter-v1.1-overlay]
     paths:
       - 'direct_native/**'
       - 'tests/test_yoloe_pf.py'
@@ -76,7 +76,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          gradle :app:assembleDebug --stacktrace 2>&1 | tee ../compile-direct.log
+          gradle :app:assembleDebug --stacktrace 2>&1 | tee ../compile-direct-v11.log
           code=${PIPESTATUS[0]}
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
           exit $code
@@ -85,17 +85,17 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: NicoScouter-DIRECT-compile-log
-          path: compile-direct.log
+          name: NicoScouter-DIRECT-V1.1-compile-log
+          path: compile-direct-v11.log
           if-no-files-found: warn
 
       - name: Verify APK
         if: steps.direct_build.outputs.exit_code == '0'
         run: |
-          cp direct_native/app/build/outputs/apk/debug/app-debug.apk NicoScouter-DIRECT-V1.apk
-          ls -lh NicoScouter-DIRECT-V1.apk
-          unzip -t NicoScouter-DIRECT-V1.apk >/dev/null
-          if unzip -l NicoScouter-DIRECT-V1.apk | grep -qE 'lib/(x86|x86_64|armeabi-v7a)/'; then
+          cp direct_native/app/build/outputs/apk/debug/app-debug.apk NicoScouter-DIRECT-V1.1-LOCK.apk
+          ls -lh NicoScouter-DIRECT-V1.1-LOCK.apk
+          unzip -t NicoScouter-DIRECT-V1.1-LOCK.apk >/dev/null
+          if unzip -l NicoScouter-DIRECT-V1.1-LOCK.apk | grep -qE 'lib/(x86|x86_64|armeabi-v7a)/'; then
             echo 'ERROR: non-arm64 library present'
             exit 1
           fi
@@ -104,6 +104,6 @@ jobs:
         if: steps.direct_build.outputs.exit_code == '0'
         uses: actions/upload-artifact@v4
         with:
-          name: NicoScouter-DIRECT-V1
-          path: NicoScouter-DIRECT-V1.apk
+          name: NicoScouter-DIRECT-V1.1-LOCK
+          path: NicoScouter-DIRECT-V1.1-LOCK.apk
           if-no-files-found: error
