@@ -62,14 +62,12 @@ jobs:
           from pathlib import Path
           main = Path('direct_native/app/src/main/java/fr/nico/scouterdirect/MainActivity.kt').read_text()
           overlay = Path('direct_native/app/src/main/java/fr/nico/scouterdirect/OverlayView.kt').read_text()
-          workflow = Path('.github/workflows/build-direct-native-v1.yml').read_text()
           assert 'val detectedAt = SystemClock.elapsedRealtime()' in main
           assert 'SearchLogic.matches(it.label, spec)' in main
           assert 'maybeAnnounceFound(search)' in main
           assert 'if (target != null)' in overlay
           assert 'detections.take(12)' in overlay
           assert 'drawTarget(canvas, mapRect(target.rect' in overlay
-          assert 'Patch V1.1' not in workflow
           print('V1.2 source invariants: PASS')
           PY
 
