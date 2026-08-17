@@ -48,8 +48,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private val tone by lazy { ToneGenerator(AudioManager.STREAM_NOTIFICATION, 90) }
     private var target: String? = null
     private var targetDisplay: String = ""
-    private var lastAlertMs = 0L
     private var lastInferenceMs = 0L
+
+    // Target lock state. A short detection dropout does not create a new lock.
+    private var targetLocked = false
+    private var lastTargetSeenMs = 0L
+    private var lockStartedMs = 0L
+    private var announcedForSearch = false
+    private val targetLostGraceMs = 2000L
 
     private val cameraPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) startCamera() else statusText.text = "❌ Caméra refusée."
@@ -109,7 +115,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         val title = TextView(this).apply {
-            text = "🔎 Nico Scouter DIRECT"
+            text = "🔎 Nico Scouter DIRECT V1.1"
             textSize = 22f
             setTextColor(0xFFFFFFFF.toInt())
             setPadding(0, 0, 0, 10)
@@ -153,6 +159,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             setOnClickListener {
                 target = null
                 targetDisplay = ""
+                resetTargetLock(resetVoice = true)
                 statusText.text = "⏹ Recherche arrêtée. L’IA continue d’afficher ce qu’elle voit."
             }
         }
@@ -232,19 +239,44 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             val tgt = target
             val bestMatch = if (tgt == null) null else detections.firstOrNull { matchesTarget(it.label, tgt) && it.score >= 0.10f }
             val visible = detections.take(8)
+
+            var acquiredNow = false
+            if (tgt != null) {
+                if (bestMatch != null) {
+                    if (!targetLocked) {
+                        targetLocked = true
+                        lockStartedMs = now
+                        acquiredNow = true
+                    }
+                    lastTargetSeenMs = now
+                } else if (targetLocked && now - lastTargetSeenMs > targetLostGraceMs) {
+                    targetLocked = false
+                    lockStartedMs = 0L
+                }
+            }
+            val lockTimeForOverlay = if (targetLocked) lockStartedMs else 0L
+
             runOnUiThread {
                 seenText.text = if (visible.isEmpty()) {
                     "IA voit : rien au-dessus de 2 %"
                 } else {
                     "IA voit : " + visible.joinToString(" • ") { "${it.label} ${(it.score * 100).toInt()}%" }
                 }
-                overlay.update(detections, srcW, srcH, tgt)
+
+                // Free scan stays exactly as before. Target graphics only activate during a search.
+                overlay.update(detections, srcW, srcH, tgt, targetDisplay, lockTimeForOverlay)
+
                 if (tgt != null) {
                     if (bestMatch != null) {
-                        statusText.text = "🟩 TROUVÉ : $targetDisplay — ${(bestMatch.score * 100).toInt()} %"
-                        alertFound()
+                        statusText.text = "🔴 TROUVÉ : $targetDisplay — ${(bestMatch.score * 100).toInt()} %"
+                    } else if (targetLocked) {
+                        statusText.text = "🔴 VERROUILLAGE : $targetDisplay"
                     } else {
                         statusText.text = "🔎 Recherche : $targetDisplay"
+                    }
+                    if (acquiredNow && !announcedForSearch) {
+                        announcedForSearch = true
+                        alertFoundOnce()
                     }
                 }
             }
@@ -298,7 +330,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
         targetDisplay = trimmed
         target = translateTarget(trimmed)
+        resetTargetLock(resetVoice = true)
         statusText.text = "🔎 Recherche : $trimmed → ${target ?: "?"}"
+    }
+
+    private fun resetTargetLock(resetVoice: Boolean) {
+        targetLocked = false
+        lastTargetSeenMs = 0L
+        lockStartedMs = 0L
+        if (resetVoice) announcedForSearch = false
     }
 
     private fun translateTarget(raw: String): String {
@@ -346,12 +386,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         return tgt.length >= 4 && (c.contains(tgt) || tgt.contains(c))
     }
 
-    private fun alertFound() {
-        val now = System.currentTimeMillis()
-        if (now - lastAlertMs < 3500) return
-        lastAlertMs = now
-        tone.startTone(ToneGenerator.TONE_PROP_BEEP, 180)
-        tts?.speak("$targetDisplay trouvé", TextToSpeech.QUEUE_FLUSH, null, "found")
+    private fun alertFoundOnce() {
+        tone.startTone(ToneGenerator.TONE_PROP_ACK, 160)
+        tts?.speak("$targetDisplay trouvé", TextToSpeech.QUEUE_FLUSH, null, "found-once")
     }
 
     override fun onInit(status: Int) {
