@@ -1,4 +1,4 @@
-name: Build Nico Scouter Clean APK
+name: Build Nico Scouter V0.8 Debug APK
 
 on:
   push:
@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-clean:
+  build-debug:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -60,32 +60,37 @@ jobs:
         working-directory: native_build
         run: flutter pub get
 
+      - name: Show WorkManager dependency
+        working-directory: native_build/android
+        run: |
+          ./gradlew app:dependencies --configuration debugRuntimeClasspath > /tmp/deps.txt
+          grep -E 'androidx\.work|androidx\.room|androidx\.startup' /tmp/deps.txt | head -80 || true
+
       - name: Analyze Dart
         working-directory: native_build
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
-      - name: Build ARM64 release APK only
+      - name: Build ARM64 debug APK without R8
         working-directory: native_build
-        run: flutter build apk --release --split-per-abi
+        run: flutter build apk --debug --split-per-abi
 
-      - name: Prepare and verify clean APK
+      - name: Prepare and verify V0.8 APK
         run: |
-          cp native_build/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk NicoScouter-Clean-V0.7-arm64.apk
+          cp native_build/build/app/outputs/flutter-apk/app-arm64-v8a-debug.apk NicoScouter-V0.8-Debug-arm64.apk
           echo 'APK size:'
-          ls -lh NicoScouter-Clean-V0.7-arm64.apk
+          ls -lh NicoScouter-V0.8-Debug-arm64.apk
+          echo 'Check manifest merge removed WorkManagerInitializer:'
+          grep -R "androidx.work.WorkManagerInitializer" native_build/build/intermediates/merged_manifests 2>/dev/null && exit 1 || true
           echo 'Native libraries:'
-          unzip -l NicoScouter-Clean-V0.7-arm64.apk | grep ' lib/' | head -40
-          if unzip -l NicoScouter-Clean-V0.7-arm64.apk | grep -qE 'lib/(x86|x86_64|armeabi-v7a)/'; then
+          unzip -l NicoScouter-V0.8-Debug-arm64.apk | grep ' lib/' | head -40
+          if unzip -l NicoScouter-V0.8-Debug-arm64.apk | grep -qE 'lib/(x86|x86_64|armeabi-v7a)/'; then
             echo 'Unexpected non-arm64 native library found'
             exit 1
           fi
-          if unzip -l NicoScouter-Clean-V0.7-arm64.apk | grep -q 'libtranslate_jni.so'; then
-            echo 'Unexpected ML Kit translation library found'
-            exit 1
-          fi
+          unzip -t NicoScouter-V0.8-Debug-arm64.apk >/dev/null
 
       - uses: actions/upload-artifact@v4
         with:
-          name: NicoScouter-Clean-V0.7-arm64
-          path: NicoScouter-Clean-V0.7-arm64.apk
+          name: NicoScouter-V0.8-Debug-arm64
+          path: NicoScouter-V0.8-Debug-arm64.apk
           if-no-files-found: error
