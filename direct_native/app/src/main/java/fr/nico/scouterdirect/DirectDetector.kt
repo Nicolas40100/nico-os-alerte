@@ -35,6 +35,14 @@ class DirectDetector(private val context: Context) : AutoCloseable {
 
     init {
         labels = context.assets.open("labels.txt").bufferedReader().readLines()
+
+        val frenchRows = context.assets.open("labels_fr.tsv").bufferedReader().useLines {
+            SearchLogic.installFrenchVocabulary(it)
+        }
+        require(frenchRows >= 4500 && SearchLogic.installedFrenchVocabularyKeys() >= 3500) {
+            "French vocabulary incomplete: rows=$frenchRows keys=${SearchLogic.installedFrenchVocabularyKeys()}"
+        }
+
         val modelFile = File(context.filesDir, "yoloe-26s-seg-pf_w8a32.tflite")
         if (!modelFile.exists() || modelFile.length() < 1_000_000) {
             context.assets.open("yoloe-26s-seg-pf_w8a32.tflite").use { src ->
@@ -109,9 +117,8 @@ class DirectDetector(private val context: Context) : AutoCloseable {
             out += Detection(cls, labels[cls], score, RectF(x1, y1, x2, y2))
         }
 
-        // V1.3: keep every valid model candidate (up to the model's 300 outputs).
-        // Free-scan UI still displays only its usual top items; target search can now inspect
-        // low-ranked candidates that V1.2 used to discard after the first 30.
+        // Keep every valid model candidate (up to the model's 300 outputs).
+        // Free-scan UI still displays only its usual top items; target search can inspect all.
         return out.sortedByDescending { it.score }
     }
 
