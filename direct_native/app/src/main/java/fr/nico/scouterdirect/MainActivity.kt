@@ -47,6 +47,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private val busy = AtomicBoolean(false)
     private val searchCounter = AtomicLong(0L)
     private val lockTracker = TargetLockTracker(lostGraceMs = 2000L)
+    private val confirmationTracker = TargetConfirmationTracker(
+        confirmHits = 2,
+        maxGapMs = 900L,
+        minIou = 0.05f,
+    )
 
     private var detector: DirectDetector? = null
     private var tts: TextToSpeech? = null
@@ -62,6 +67,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var lastTargetDetectionMs = 0L
     private var lastTargetToken: Long? = null
     private val visualHoldMs = 900L
+    private val targetCandidateMinScore = 0.04f
+    private val immediateTargetMinScore = 0.10f
 
     private val cameraPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) startCamera() else statusText.text = "❌ Caméra refusée."
@@ -122,7 +129,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         val title = TextView(this).apply {
-            text = "🔎 Nico Scouter DIRECT V1.2"
+            text = "🔎 Nico Scouter DIRECT V1.3"
             textSize = 22f
             setTextColor(0xFFFFFFFF.toInt())
             setPadding(0, 0, 0, 10)
@@ -243,11 +250,28 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             val srcH = bitmap.height
             val visible = detections.take(8)
 
-            // Read the latest search AFTER inference. Detection itself is prompt-free, so an old
-            // frame can still be matched against the newest user request without stale-target races.
+            // Detection remains prompt-free. V1.3 searches every returned model candidate rather
+            // than only V1.2's top 30, while keeping the free-scan display unchanged.
             val search = currentSearch
-            val bestMatch = search?.let { spec ->
-                detections.firstOrNull { it.score >= 0.10f && SearchLogic.matches(it.label, spec) }
+            val candidate = search?.let { spec ->
+                detections.firstOrNull {
+                    it.score >= targetCandidateMinScore && SearchLogic.matches(it.label, spec)
+                }
+            }
+
+            val confirmation = confirmationTracker.update(
+                search?.token,
+                candidate?.rect?.let { CandidateBox(it.left, it.top, it.right, it.bottom) },
+                detectedAt,
+            )
+
+            // Preserve V1.2 responsiveness for a confident target (>=10%). A weaker target
+            // (4–9.9%) must appear coherently on two close frames before it can trigger LOCK.
+            val bestMatch = when {
+                candidate == null -> null
+                candidate.score >= immediateTargetMinScore -> candidate
+                confirmation.confirmed -> candidate
+                else -> null
             }
 
             val lock = lockTracker.update(search?.token, bestMatch != null, detectedAt)
@@ -294,6 +318,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     if (search != null) {
                         statusText.text = when {
                             bestMatch != null -> "🔴 TROUVÉ : ${search.display} — ${(bestMatch.score * 100).toInt()} %"
+                            candidate != null -> "🔎 Vérification : ${search.display} — ${(candidate.score * 100).toInt()} %"
                             lock.locked -> "🔴 VERROUILLAGE : ${search.display}"
                             else -> "🔎 Recherche : ${search.display}"
                         }
