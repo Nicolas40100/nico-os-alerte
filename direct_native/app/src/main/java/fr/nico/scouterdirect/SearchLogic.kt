@@ -136,9 +136,14 @@ object SearchLogic {
             candidates += lookupFullFrenchVocabulary(simplified)
         }
 
-        // Colloquial aliases still help descriptive phrases such as "mes baskets blanches".
-        for (word in normalized.split(' ')) {
-            aliases[word]?.let { candidates += it }
+        // Fall back to one colloquial head word only if the complete vocabulary found nothing.
+        // This avoids "table en verre" becoming both TABLE and GLASS.
+        if (candidates.isEmpty()) {
+            for (word in normalized.split(' ')) {
+                val alias = aliases[word] ?: continue
+                candidates += alias
+                break
+            }
         }
 
         // English input keeps working, and an unknown word is never silently discarded.
@@ -152,23 +157,33 @@ object SearchLogic {
 
         index[query]?.let { return it }
 
-        val queryTokens = simplifyFrench(query).split(' ').filter { it.isNotBlank() }.toSet()
-        if (queryTokens.isEmpty()) return emptySet()
+        val queryTokenList = simplifyFrench(query).split(' ').filter { it.isNotBlank() }
+        if (queryTokenList.isEmpty()) return emptySet()
 
         var bestTokenCount = 0
+        var bestStart = Int.MAX_VALUE
         val matches = linkedSetOf<String>()
+
         for ((key, englishLabels) in index) {
-            val keyTokens = key.split(' ').filter { it.isNotBlank() }.toSet()
-            if (keyTokens.isEmpty() || keyTokens.size > queryTokens.size) continue
-            val tokenMatch = keyTokens.all { keyToken ->
-                queryTokens.any { queryToken -> frenchTokenEquivalent(queryToken, keyToken) }
+            val keyTokens = key.split(' ').filter { it.isNotBlank() }.distinct()
+            if (keyTokens.isEmpty() || keyTokens.size > queryTokenList.size) continue
+
+            val positions = keyTokens.map { keyToken ->
+                queryTokenList.indexOfFirst { queryToken -> frenchTokenEquivalent(queryToken, keyToken) }
             }
-            if (!tokenMatch) continue
-            if (keyTokens.size > bestTokenCount) {
-                bestTokenCount = keyTokens.size
+            if (positions.any { it < 0 }) continue
+
+            val tokenCount = keyTokens.size
+            val start = positions.minOrNull() ?: Int.MAX_VALUE
+            val better = tokenCount > bestTokenCount || (tokenCount == bestTokenCount && start < bestStart)
+            if (better) {
+                bestTokenCount = tokenCount
+                bestStart = start
                 matches.clear()
             }
-            if (keyTokens.size == bestTokenCount) matches += englishLabels
+            if (tokenCount == bestTokenCount && start == bestStart) {
+                matches += englishLabels
+            }
         }
         return matches
     }
