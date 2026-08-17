@@ -1,7 +1,7 @@
-name: nico_scouter_native
-description: Nico Scouter native Android object finder
+name: nico_scouter_clean
+description: Nico Scouter clean native Android object finder
 publish_to: 'none'
-version: 0.5.0+5
+version: 0.7.0+7
 
 environment:
   sdk: '>=3.8.1 <4.0.0'
@@ -9,10 +9,9 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  ultralytics_yolo: ^0.6.11
+  ultralytics_yolo: ^0.6.13
   speech_to_text: ^7.4.0
   flutter_tts: ^4.2.5
-  google_mlkit_translation: ^0.14.0
 
 dev_dependencies:
   flutter_test:
