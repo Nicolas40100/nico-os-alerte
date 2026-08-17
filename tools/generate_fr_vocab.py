@@ -18,6 +18,7 @@ OVERRIDES = {
     "radiator": ["radiateur", "chauffage"],
     "heater": ["chauffage", "radiateur"],
     "toolbox": ["boite a outils", "caisse a outils"],
+    "watering can": ["arrosoir"],
     "dog": ["chien"],
     "rabbit": ["lapin"],
     "stuffed animal": ["peluche", "animal en peluche"],
