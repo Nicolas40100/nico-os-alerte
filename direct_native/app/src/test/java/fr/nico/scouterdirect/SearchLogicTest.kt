@@ -61,4 +61,21 @@ class SearchLogicTest {
         assertTrue(SearchLogic.matches("rabbit", SearchLogic.buildSpec(9L, "lapin")!!))
         assertTrue(SearchLogic.matches("socks", SearchLogic.buildSpec(10L, "chaussettes")!!))
     }
+
+    @Test
+    fun generatedVocabularyHandlesWordsNeverHardcoded() {
+        val rows = SearchLogic.installFrenchVocabulary(
+            sequenceOf(
+                "stapler\tagrafeuse",
+                "watering can\tarrosoir",
+                "fire extinguisher\textincteur|extincteur d incendie",
+                "desk organizer\torganisateur de bureau",
+            )
+        )
+        assertTrue(rows == 4)
+        assertTrue(SearchLogic.matches("stapler", SearchLogic.buildSpec(20L, "une agrafeuse rouge")!!))
+        assertTrue(SearchLogic.matches("watering can", SearchLogic.buildSpec(21L, "mon arrosoir")!!))
+        assertTrue(SearchLogic.matches("fire extinguisher", SearchLogic.buildSpec(22L, "extincteur")!!))
+        assertTrue(SearchLogic.matches("desk organizer", SearchLogic.buildSpec(23L, "organisateur de bureau noir")!!))
+    }
 }
