@@ -9,6 +9,8 @@ LABELS = Path("direct_native/app/src/main/assets/labels.txt")
 OUT = Path("direct_native/app/src/main/assets/labels_fr.tsv")
 
 # Only human synonyms / translation corrections. No brand-name catalogue is added.
+# If the model itself contains a brand-specific class (for example Wii), a generic French
+# object word may point to it internally; the user still only needs to say the common noun.
 OVERRIDES = {
     "shoe": ["chaussure", "chaussures", "basket", "baskets"],
     "sock": ["chaussette", "chaussettes"],
@@ -20,7 +22,8 @@ OVERRIDES = {
     "rabbit": ["lapin"],
     "stuffed animal": ["peluche", "animal en peluche"],
     "remote control": ["telecommande"],
-    "game console": ["console de jeux", "console"],
+    "video game": ["jeu video", "console de jeux", "console"],
+    "Wii": ["console de jeux", "console"],
     "game controller": ["manette", "manette de jeux"],
     "car": ["voiture"],
     "camera": ["appareil photo", "camera"],
