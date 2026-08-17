@@ -1,8 +1,8 @@
-name: Build Nico Scouter DIRECT Native V1
+name: Build Nico Scouter DIRECT Native V1.2 AUDIT
 
 on:
   push:
-    branches: [build-nico-scouter-v0]
+    branches: [build-nico-scouter-v1.2-audit]
     paths:
       - 'direct_native/**'
       - 'tests/test_yoloe_pf.py'
@@ -56,6 +56,27 @@ jobs:
         with:
           gradle-version: '8.13'
 
+      - name: Verify clean V1.2 source invariants
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          main = Path('direct_native/app/src/main/java/fr/nico/scouterdirect/MainActivity.kt').read_text()
+          overlay = Path('direct_native/app/src/main/java/fr/nico/scouterdirect/OverlayView.kt').read_text()
+          workflow = Path('.github/workflows/build-direct-native-v1.yml').read_text()
+          assert 'val detectedAt = SystemClock.elapsedRealtime()' in main
+          assert 'SearchLogic.matches(it.label, spec)' in main
+          assert 'maybeAnnounceFound(search)' in main
+          assert 'if (target != null)' in overlay
+          assert 'detections.take(12)' in overlay
+          assert 'drawTarget(canvas, mapRect(target.rect' in overlay
+          assert 'Patch V1.1' not in workflow
+          print('V1.2 source invariants: PASS')
+          PY
+
+      - name: Run target and lock unit tests
+        working-directory: direct_native
+        run: gradle :app:testDebugUnitTest --stacktrace
+
       - name: Verify no WorkManager or Flutter dependency
         working-directory: direct_native
         run: |
@@ -76,27 +97,39 @@ jobs:
         shell: bash
         run: |
           set +e
-          gradle :app:assembleDebug --stacktrace 2>&1 | tee ../compile-direct.log
+          gradle :app:assembleDebug --stacktrace 2>&1 | tee ../compile-direct-v12.log
           code=${PIPESTATUS[0]}
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
           exit $code
 
-      - name: Upload direct compile log
+      - name: Upload compile log
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: NicoScouter-DIRECT-compile-log
-          path: compile-direct.log
+          name: NicoScouter-DIRECT-V1.2-compile-log
+          path: compile-direct-v12.log
           if-no-files-found: warn
 
       - name: Verify APK
         if: steps.direct_build.outputs.exit_code == '0'
         run: |
-          cp direct_native/app/build/outputs/apk/debug/app-debug.apk NicoScouter-DIRECT-V1.apk
-          ls -lh NicoScouter-DIRECT-V1.apk
-          unzip -t NicoScouter-DIRECT-V1.apk >/dev/null
-          if unzip -l NicoScouter-DIRECT-V1.apk | grep -qE 'lib/(x86|x86_64|armeabi-v7a)/'; then
+          cp direct_native/app/build/outputs/apk/debug/app-debug.apk NicoScouter-DIRECT-V1.2-AUDIT-FIX.apk
+          ls -lh NicoScouter-DIRECT-V1.2-AUDIT-FIX.apk
+          unzip -t NicoScouter-DIRECT-V1.2-AUDIT-FIX.apk >/dev/null
+          if unzip -l NicoScouter-DIRECT-V1.2-AUDIT-FIX.apk | grep -qE 'lib/(x86|x86_64|armeabi-v7a)/'; then
             echo 'ERROR: non-arm64 library present'
+            exit 1
+          fi
+          if unzip -p NicoScouter-DIRECT-V1.2-AUDIT-FIX.apk classes.dex | strings | grep -q 'Nico Scouter DIRECT V1.2'; then
+            echo 'V1.2 title present in APK'
+          else
+            echo 'ERROR: V1.2 title missing from APK'
+            exit 1
+          fi
+          if unzip -p NicoScouter-DIRECT-V1.2-AUDIT-FIX.apk classes.dex | strings | grep -q 'LOCK'; then
+            echo 'LOCK HUD present in APK'
+          else
+            echo 'ERROR: LOCK HUD missing from APK'
             exit 1
           fi
 
@@ -104,6 +137,6 @@ jobs:
         if: steps.direct_build.outputs.exit_code == '0'
         uses: actions/upload-artifact@v4
         with:
-          name: NicoScouter-DIRECT-V1
-          path: NicoScouter-DIRECT-V1.apk
+          name: NicoScouter-DIRECT-V1.2-AUDIT-FIX
+          path: NicoScouter-DIRECT-V1.2-AUDIT-FIX.apk
           if-no-files-found: error
