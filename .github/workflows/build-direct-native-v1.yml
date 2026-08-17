@@ -1,4 +1,4 @@
-name: Build Nico Scouter DIRECT Native V1.1
+name: Build Nico Scouter DIRECT Native V1.1.1 FIX
 
 on:
   push:
@@ -47,6 +47,82 @@ jobs:
           print('labels', len(labels), 'model MB', round(model.stat().st_size / 1024 / 1024, 2))
           PY
 
+      - name: Patch V1.1.1 target lock fixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          main_path = Path('direct_native/app/src/main/java/fr/nico/scouterdirect/MainActivity.kt')
+          main = main_path.read_text(encoding='utf-8')
+          replacements = [
+              (
+                  'text = "🔎 Nico Scouter DIRECT V1.1"',
+                  'text = "🔎 Nico Scouter DIRECT V1.1.1 FIX"',
+              ),
+              (
+                  'overlay.update(detections, srcW, srcH, tgt, targetDisplay, lockTimeForOverlay)',
+                  'overlay.update(detections, srcW, srcH, bestMatch, targetDisplay, lockTimeForOverlay)',
+              ),
+              (
+                  '''if (acquiredNow && !announcedForSearch) {\n                        announcedForSearch = true\n                        alertFoundOnce()\n                    }''',
+                  '''if (targetLocked && !announcedForSearch) {\n                        announcedForSearch = alertFoundOnce()\n                    }''',
+              ),
+              (
+                  '''private fun alertFoundOnce() {\n        tone.startTone(ToneGenerator.TONE_PROP_ACK, 160)\n        tts?.speak("$targetDisplay trouvé", TextToSpeech.QUEUE_FLUSH, null, "found-once")\n    }''',
+                  '''private fun alertFoundOnce(): Boolean {\n        val engine = tts ?: return false\n        val result = engine.speak("$targetDisplay trouvé", TextToSpeech.QUEUE_FLUSH, null, "found-once")\n        if (result == TextToSpeech.ERROR) return false\n        tone.startTone(ToneGenerator.TONE_PROP_ACK, 160)\n        return true\n    }''',
+              ),
+          ]
+          for old, new in replacements:
+              if old not in main:
+                  raise SystemExit(f'MainActivity patch target missing: {old[:80]!r}')
+              main = main.replace(old, new, 1)
+          main_path.write_text(main, encoding='utf-8')
+
+          overlay_path = Path('direct_native/app/src/main/java/fr/nico/scouterdirect/OverlayView.kt')
+          overlay = overlay_path.read_text(encoding='utf-8')
+          overlay_replacements = [
+              ('private var target: String? = null', 'private var lockedTarget: Detection? = null'),
+              ('targetLabel: String?,', 'lockedTargetDetection: Detection?,'),
+              ('target = targetLabel', 'lockedTarget = lockedTargetDetection'),
+              ('val isTarget = target != null && canonical(d.label) == target', 'val isTarget = lockedTarget === d'),
+          ]
+          for old, new in overlay_replacements:
+              if old not in overlay:
+                  raise SystemExit(f'Overlay patch target missing: {old!r}')
+              overlay = overlay.replace(old, new, 1)
+          overlay_path.write_text(overlay, encoding='utf-8')
+
+          gradle_path = Path('direct_native/app/build.gradle.kts')
+          gradle = gradle_path.read_text(encoding='utf-8')
+          for old, new in [
+              ('applicationId = "fr.nico.scouterdirect.v11"', 'applicationId = "fr.nico.scouterdirect.v111fix"'),
+              ('versionCode = 11', 'versionCode = 12'),
+              ('versionName = "1.1-overlay"', 'versionName = "1.1.1-lockfix"'),
+          ]:
+              if old not in gradle:
+                  raise SystemExit(f'Gradle patch target missing: {old!r}')
+              gradle = gradle.replace(old, new, 1)
+          gradle_path.write_text(gradle, encoding='utf-8')
+
+          manifest_path = Path('direct_native/app/src/main/AndroidManifest.xml')
+          manifest = manifest_path.read_text(encoding='utf-8')
+          old = 'android:label="Nico Scouter Direct V1.1"'
+          new = 'android:label="Nico Scouter Direct V1.1.1 FIX"'
+          if old not in manifest:
+              raise SystemExit('Manifest label patch target missing')
+          manifest_path.write_text(manifest.replace(old, new, 1), encoding='utf-8')
+
+          # Hard guards: this build must use the exact detector result for the red overlay,
+          # and must retry speech until TextToSpeech actually accepts it.
+          patched_main = main_path.read_text(encoding='utf-8')
+          patched_overlay = overlay_path.read_text(encoding='utf-8')
+          assert 'overlay.update(detections, srcW, srcH, bestMatch, targetDisplay, lockTimeForOverlay)' in patched_main
+          assert 'announcedForSearch = alertFoundOnce()' in patched_main
+          assert 'private fun alertFoundOnce(): Boolean' in patched_main
+          assert 'val isTarget = lockedTarget === d' in patched_overlay
+          print('V1.1.1 lock/TTS patch guards: PASS')
+          PY
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -76,7 +152,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          gradle :app:assembleDebug --stacktrace 2>&1 | tee ../compile-direct-v11.log
+          gradle :app:assembleDebug --stacktrace 2>&1 | tee ../compile-direct-v111.log
           code=${PIPESTATUS[0]}
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
           exit $code
@@ -85,17 +161,17 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: NicoScouter-DIRECT-V1.1-compile-log
-          path: compile-direct-v11.log
+          name: NicoScouter-DIRECT-V1.1.1-FIX-compile-log
+          path: compile-direct-v111.log
           if-no-files-found: warn
 
       - name: Verify APK
         if: steps.direct_build.outputs.exit_code == '0'
         run: |
-          cp direct_native/app/build/outputs/apk/debug/app-debug.apk NicoScouter-DIRECT-V1.1-LOCK.apk
-          ls -lh NicoScouter-DIRECT-V1.1-LOCK.apk
-          unzip -t NicoScouter-DIRECT-V1.1-LOCK.apk >/dev/null
-          if unzip -l NicoScouter-DIRECT-V1.1-LOCK.apk | grep -qE 'lib/(x86|x86_64|armeabi-v7a)/'; then
+          cp direct_native/app/build/outputs/apk/debug/app-debug.apk NicoScouter-DIRECT-V1.1.1-LOCK-FIX.apk
+          ls -lh NicoScouter-DIRECT-V1.1.1-LOCK-FIX.apk
+          unzip -t NicoScouter-DIRECT-V1.1.1-LOCK-FIX.apk >/dev/null
+          if unzip -l NicoScouter-DIRECT-V1.1.1-LOCK-FIX.apk | grep -qE 'lib/(x86|x86_64|armeabi-v7a)/'; then
             echo 'ERROR: non-arm64 library present'
             exit 1
           fi
@@ -104,6 +180,6 @@ jobs:
         if: steps.direct_build.outputs.exit_code == '0'
         uses: actions/upload-artifact@v4
         with:
-          name: NicoScouter-DIRECT-V1.1-LOCK
-          path: NicoScouter-DIRECT-V1.1-LOCK.apk
+          name: NicoScouter-DIRECT-V1.1.1-LOCK-FIX
+          path: NicoScouter-DIRECT-V1.1.1-LOCK-FIX.apk
           if-no-files-found: error
