@@ -4,7 +4,7 @@
 
     <application
         android:allowBackup="false"
-        android:label="Nico Scouter Direct"
+        android:label="Nico Scouter Direct V1.1"
         android:theme="@style/Theme.AppCompat.DayNight.NoActionBar"
         android:usesCleartextTraffic="false">
         <activity
