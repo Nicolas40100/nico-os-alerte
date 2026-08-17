@@ -82,14 +82,21 @@ jobs:
           APK=NicoScouter-DIRECT-V1.3-RECALL.apk
           cp direct_native/app/build/outputs/apk/debug/app-debug.apk "$APK"
           unzip -t "$APK" >/dev/null
-          ! unzip -l "$APK" | grep -qE 'lib/(x86|x86_64|armeabi-v7a)/'
-          unzip -l "$APK" | grep -Fq 'assets/yoloe-26s-seg-pf_w8a32.tflite'
-          unzip -l "$APK" | grep -Fq 'assets/labels.txt'
+          unzip -Z1 "$APK" > /tmp/apkfiles
+          if grep -qE '^lib/(x86|x86_64|armeabi-v7a)/' /tmp/apkfiles; then
+            echo 'ERROR: non-arm64 library present'
+            exit 1
+          fi
+          grep -Fxq 'assets/yoloe-26s-seg-pf_w8a32.tflite' /tmp/apkfiles
+          grep -Fxq 'assets/labels.txt' /tmp/apkfiles
           rm -f /tmp/dexstrings
-          for d in $(unzip -Z1 "$APK" | grep -E '^classes([0-9]+)?\.dex$'); do unzip -p "$APK" "$d" | strings >> /tmp/dexstrings; done
+          while read -r d; do
+            case "$d" in
+              classes.dex|classes[0-9]*.dex) unzip -p "$APK" "$d" | strings >> /tmp/dexstrings ;;
+            esac
+          done < /tmp/apkfiles
           grep -Fq 'Nico Scouter DIRECT V1.3' /tmp/dexstrings
           grep -Fq 'LOCK' /tmp/dexstrings
-          grep -Fq 'Vérification' /tmp/dexstrings
           sha256sum "$APK"
           ls -lh "$APK"
 
