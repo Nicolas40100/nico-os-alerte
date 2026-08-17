@@ -40,4 +40,25 @@ class SearchLogicTest {
         val spec = SearchLogic.buildSpec(5L, "remote control")!!
         assertTrue(SearchLogic.matches("remote control", spec))
     }
+
+    @Test
+    fun radiatorAndHeaterFrenchWork() {
+        val spec = SearchLogic.buildSpec(6L, "radiateur")!!
+        assertTrue(SearchLogic.matches("radiator", spec))
+        assertTrue(SearchLogic.matches("heater", spec))
+    }
+
+    @Test
+    fun toolboxFrenchPhraseWorks() {
+        val spec = SearchLogic.buildSpec(7L, "caisse à outils")!!
+        assertTrue(SearchLogic.matches("toolbox", spec))
+        assertTrue(SearchLogic.matches("tool box", spec))
+    }
+
+    @Test
+    fun dogRabbitAndSocksFrenchWork() {
+        assertTrue(SearchLogic.matches("dog", SearchLogic.buildSpec(8L, "chien")!!))
+        assertTrue(SearchLogic.matches("rabbit", SearchLogic.buildSpec(9L, "lapin")!!))
+        assertTrue(SearchLogic.matches("socks", SearchLogic.buildSpec(10L, "chaussettes")!!))
+    }
 }
