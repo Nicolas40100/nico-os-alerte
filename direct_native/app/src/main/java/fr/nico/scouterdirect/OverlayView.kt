@@ -16,7 +16,7 @@ class OverlayView(context: Context) : View(context) {
     private var targetDisplay: String = ""
     private var lockStartedMs: Long = 0L
 
-    // Free scan: unchanged from the stable V1, deliberately discreet.
+    // Free scan remains discreet, but V1.5 only shows sufficiently reliable object-like labels.
     private val normalPaint = Paint().apply {
         color = Color.argb(180, 255, 255, 255)
         style = Paint.Style.STROKE
@@ -93,10 +93,10 @@ class OverlayView(context: Context) : View(context) {
         val dy = (height - drawnH) / 2f
         val target = lockedTarget
 
-        // Keep the stable V1 free-scan presentation. The target is excluded here and drawn last.
-        for (d in detections.take(12)) {
+        // V1.5 clean free scan: filter first so parasite labels do not consume the 12 visible slots.
+        val freeScan = detections.asSequence().filter(FreeScanFilter::accept).take(12)
+        for (d in freeScan) {
             if (d === target) continue
-            if (d.score < 0.25f) continue
             val r = mapRect(d.rect, scale, dx, dy)
             canvas.drawRect(r, normalPaint)
             val txt = "${d.label} ${(d.score * 100).toInt()}%"
@@ -108,7 +108,7 @@ class OverlayView(context: Context) : View(context) {
             )
         }
 
-        // Critical V1.2 fix: the requested target is always drawn, even if it ranks 13th–30th.
+        // Requested target is always drawn separately, even if free-scan filtering would hide it.
         if (target != null) {
             drawTarget(canvas, mapRect(target.rect, scale, dx, dy), target)
         }
@@ -144,7 +144,6 @@ class OverlayView(context: Context) : View(context) {
             targetTextPaint,
         )
 
-        // Starts from the actual post-inference acquisition time, so the user really sees it.
         val elapsed = if (lockStartedMs > 0L) SystemClock.elapsedRealtime() - lockStartedMs else Long.MAX_VALUE
         if (elapsed in 0L..600L) {
             canvas.drawText("LOCK", cx, cy - 34f, lockTextPaint)
