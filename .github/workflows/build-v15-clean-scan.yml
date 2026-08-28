@@ -1,0 +1,128 @@
+name: Nico Scouter V1.5 CLEAN SCAN
+on:
+  push:
+    branches: [build-nico-scouter-v1.5-clean-scan]
+    paths: ['direct_native/**', 'tests/**', 'tools/generate_fr_vocab.py', '.github/workflows/build-v15-clean-scan.yml']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+
+      - name: Verify and export exact object model
+        run: |
+          pip install torch==2.12.1 torchvision==0.27.1 --index-url https://download.pytorch.org/whl/cpu
+          pip install ultralytics==8.4.120 litert-torch==0.9.3 ai-edge-litert==2.1.6
+          python tests/test_yoloe_pf.py
+
+      - name: Prepare base Android assets
+        run: |
+          mkdir -p direct_native/app/src/main/assets
+          cp yoloe-26s-seg-pf_w8a32.tflite direct_native/app/src/main/assets/
+          python - <<'PY'
+          import base64,json,zipfile
+          from pathlib import Path
+          with zipfile.ZipFile('yoloe-26s-seg-pf_w8a32.tflite') as z:
+              m=json.loads(z.read('metadata.json'))
+          n=m['names']; labels=[n[str(i)] if str(i) in n else n[i] for i in range(len(n))]
+          assert len(labels) == 4585
+          Path('direct_native/app/src/main/assets/labels.txt').write_text('\n'.join(labels),encoding='utf-8')
+          Path('direct_native/app/src/main/assets/shoes_test.jpg').write_bytes(base64.b64decode(Path('tests/shoes_test_640.b64').read_text().strip()))
+          print('base labels', len(labels))
+          PY
+
+      - name: Generate complete French vocabulary offline
+        run: |
+          pip install argostranslate==1.11.0
+          python tools/generate_fr_vocab.py
+          python - <<'PY'
+          from pathlib import Path
+          rows=Path('direct_native/app/src/main/assets/labels_fr.tsv').read_text(encoding='utf-8').splitlines()
+          assert len(rows)==4585, len(rows)
+          data='\n'.join(rows).lower()
+          for expected in ('printer\timprimante','radiator\tradiateur','stapler\t','watering can\t','video game\t','wii\t'):
+              assert expected in data, expected
+          assert any(line.lower().startswith('watering can\t') and 'arrosoir' in line.lower() for line in rows)
+          print('French vocabulary rows:',len(rows))
+          PY
+
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: '17'}
+
+      - uses: gradle/actions/setup-gradle@v4
+        with: {gradle-version: '8.13'}
+
+      - name: Verify V1.5 source invariants
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          detector=Path('direct_native/app/src/main/java/fr/nico/scouterdirect/DirectDetector.kt').read_text()
+          main=Path('direct_native/app/src/main/java/fr/nico/scouterdirect/MainActivity.kt').read_text()
+          overlay=Path('direct_native/app/src/main/java/fr/nico/scouterdirect/OverlayView.kt').read_text()
+          filt=Path('direct_native/app/src/main/java/fr/nico/scouterdirect/FreeScanFilter.kt').read_text()
+          gradle=Path('direct_native/app/build.gradle.kts').read_text()
+          assert 'fr.nico.scouterdirect.v15cleanscan' in gradle
+          assert 'Nico Scouter DIRECT V1.5 CLEAN' in main
+          assert 'MIN_SCORE = 0.30f' in filt
+          for bad in ('squeeze','remove','loop','interaction'):
+              assert f'"{bad}"' in filt
+          assert 'filter(FreeScanFilter::accept).take(8)' in main
+          assert 'filter(FreeScanFilter::accept).take(12)' in overlay
+          assert 'detections.firstOrNull' in main
+          assert 'targetCandidateMinScore = 0.04f' in main
+          assert 'immediateTargetMinScore = 0.10f' in main
+          assert '.take(30)' not in detector
+          print('V1.5 source invariants: PASS')
+          PY
+
+      - name: Run search, lock and clean-scan unit tests
+        working-directory: direct_native
+        run: gradle :app:testDebugUnitTest --stacktrace
+
+      - name: Guard dependencies
+        working-directory: direct_native
+        run: |
+          gradle :app:dependencies --configuration debugRuntimeClasspath > /tmp/deps
+          ! grep -q 'androidx.work:work-runtime' /tmp/deps
+          ! grep -qi 'flutter' /tmp/deps
+
+      - name: Build APK
+        working-directory: direct_native
+        run: gradle :app:assembleDebug --stacktrace
+
+      - name: Verify final APK
+        run: |
+          APK=NicoScouter-DIRECT-V1.5-CLEAN-SCAN.apk
+          cp direct_native/app/build/outputs/apk/debug/app-debug.apk "$APK"
+          python - <<'PY'
+          import hashlib, zipfile
+          from pathlib import Path
+          apk=Path('NicoScouter-DIRECT-V1.5-CLEAN-SCAN.apk')
+          with zipfile.ZipFile(apk) as z:
+              assert z.testzip() is None
+              names=z.namelist()
+              assert 'assets/yoloe-26s-seg-pf_w8a32.tflite' in names
+              assert 'assets/labels.txt' in names
+              assert 'assets/labels_fr.tsv' in names
+              assert not any(n.startswith(('lib/x86/','lib/x86_64/','lib/armeabi-v7a/')) for n in names)
+              fr=z.read('assets/labels_fr.tsv').decode('utf-8').splitlines()
+              assert len(fr)==4585, len(fr)
+              dex=b''.join(z.read(n) for n in names if n.startswith('classes') and n.endswith('.dex'))
+              assert b'Nico Scouter DIRECT V1.5 CLEAN' in dex
+              assert b'squeeze' in dex and b'FreeScanFilter' in dex
+              assert b'LOCK' in dex
+          print('sha256', hashlib.sha256(apk.read_bytes()).hexdigest())
+          print('APK bytes', apk.stat().st_size)
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NicoScouter-DIRECT-V1.5-CLEAN-SCAN
+          path: NicoScouter-DIRECT-V1.5-CLEAN-SCAN.apk
+          if-no-files-found: error
