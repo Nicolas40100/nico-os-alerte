@@ -129,7 +129,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         val title = TextView(this).apply {
-            text = "🔎 Nico Scouter DIRECT V1.4 FR"
+            text = "🔎 Nico Scouter DIRECT V1.5 CLEAN"
             textSize = 22f
             setTextColor(0xFFFFFFFF.toInt())
             setPadding(0, 0, 0, 10)
@@ -248,7 +248,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             val detectedAt = SystemClock.elapsedRealtime()
             val srcW = bitmap.width
             val srcH = bitmap.height
-            val visible = detections.take(8)
+            val visible = detections.asSequence().filter(FreeScanFilter::accept).take(8).toList()
 
             val search = currentSearch
             val candidate = search?.let { spec ->
@@ -293,7 +293,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             runOnUiThread {
                 seenText.text = if (visible.isEmpty()) {
-                    "IA voit : rien au-dessus de 2 %"
+                    "IA voit : rien de suffisamment fiable"
                 } else {
                     "IA voit : " + visible.joinToString(" • ") { "${it.label} ${(it.score * 100).toInt()}%" }
                 }
