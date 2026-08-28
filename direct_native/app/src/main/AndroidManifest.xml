@@ -10,7 +10,7 @@
 
     <application
         android:allowBackup="false"
-        android:label="Nico Scouter Direct V1.4 FR"
+        android:label="Nico Scouter Direct V1.5 Clean"
         android:theme="@style/Theme.AppCompat.DayNight.NoActionBar"
         android:usesCleartextTraffic="false">
         <activity
