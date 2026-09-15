@@ -38,7 +38,7 @@ jobs:
           inbox.setdefault('version', 2)
           inbox.setdefault('commands', [])
 
-          # Commands below are obsolete, expired, or malformed repair envelopes.
+          # Commands below are obsolete, expired, malformed, or superseded repair envelopes.
           # They are intentionally quarantined so Nico OS does not retry them.
           superseded = {
               'chatgpt-20260915-repair-autoecole-marle-complete-v2',
@@ -52,6 +52,11 @@ jobs:
               'chatgpt-20260912-leposte-progress85',
               'chatgpt-20260914-absence-complete-casting-15sep',
               'chatgpt-20260914-absence-pictanovo-15sep',
+              'chatgpt-20260915-1012-autoecole-repair-v4-68e976e0',
+              'chatgpt-20260915-1012-leposte-repair-v4-ab73b60f',
+              'chatgpt-20260915-1012-absence-repair-v4-a039ac3c',
+              'chatgpt-20260915-1040-absence-dedupe-v5-f4306f3d',
+              'chatgpt-20260915-absence-budget-next',
           }
           inbox['commands'] = [
               c for c in inbox['commands']
