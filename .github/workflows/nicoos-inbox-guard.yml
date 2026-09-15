@@ -1,13 +1,89 @@
 name: Nico OS inbox guard
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'nicoos_bridge/pending/*.json'
   workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: nicoos-inbox-guard
+  cancel-in-progress: false
+
 jobs:
-  maintenance-hold:
+  merge-pending-once:
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Nico OS inbox guard temporarily paused for queue cleanup"
+      - name: Checkout latest main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Validate and merge pending envelopes
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64, json
+          from pathlib import Path
+
+          inbox_path = Path('nicoos_bridge/inbox.json')
+          inbox = json.loads(inbox_path.read_text(encoding='utf-8'))
+          inbox.setdefault('version', 2)
+          inbox.setdefault('commands', [])
+          existing = {c.get('id') for c in inbox['commands'] if c.get('id')}
+
+          pending_dir = Path('nicoos_bridge/pending')
+          merged = []
+          rejected = []
+
+          for p in sorted(pending_dir.glob('*.json')) if pending_dir.exists() else []:
+              try:
+                  data = json.loads(p.read_text(encoding='utf-8'))
+                  for cmd in data.get('commands', []):
+                      cid = cmd.get('id')
+                      chunks = cmd.get('chunks')
+                      if not cid or not isinstance(chunks, list) or not chunks:
+                          raise ValueError('missing id/chunks')
+                      # Every RSA-2048 ciphertext block must be strict base64 and 256 bytes.
+                      for chunk in chunks:
+                          raw = base64.b64decode(chunk, validate=True)
+                          if len(raw) != 256:
+                              raise ValueError('invalid RSA block length')
+                      if cid not in existing:
+                          inbox['commands'].append(cmd)
+                          existing.add(cid)
+                          merged.append(cid)
+              except Exception as exc:
+                  rejected.append(f'{p.name}: {exc}')
+              finally:
+                  # pending files are one-shot: never let an old repair reappear later.
+                  try:
+                      p.unlink()
+                  except FileNotFoundError:
+                      pass
+
+          inbox_path.write_text(
+              json.dumps(inbox, ensure_ascii=False, separators=(',', ':')),
+              encoding='utf-8'
+          )
+          print('MERGED=' + ','.join(merged))
+          print('REJECTED=' + ' | '.join(rejected))
+          PY
+
+      - name: Commit queue update and consume pending files
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo 'No queue changes.'
+            exit 0
+          fi
+          git config user.name 'nicoos-inbox-guard'
+          git config user.email 'actions@users.noreply.github.com'
+          git add -A nicoos_bridge/inbox.json nicoos_bridge/pending
+          git commit -m 'Nico OS: merge validated pending commands'
+          git push origin main
