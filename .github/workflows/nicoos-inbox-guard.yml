@@ -37,10 +37,22 @@ jobs:
           inbox = json.loads(inbox_path.read_text(encoding='utf-8'))
           inbox.setdefault('version', 2)
           inbox.setdefault('commands', [])
+
+          # These repair envelopes expired before Nico OS consumed them.
+          # They are superseded by the non-expired v3 repair envelopes.
+          superseded = {
+              'chatgpt-20260915-repair-autoecole-marle-complete-v2',
+              'chatgpt-20260915-repair-leposte-v2',
+              'chatgpt-20260915-repair-absence-v2',
+          }
+          inbox['commands'] = [
+              c for c in inbox['commands']
+              if c.get('id') not in superseded
+          ]
           existing = {c.get('id') for c in inbox['commands'] if c.get('id')}
 
           # Guard direct writes: restore any command that existed in HEAD^ but
-          # disappeared from the latest inbox rewrite.
+          # disappeared from the latest inbox rewrite, except superseded IDs.
           try:
               prev_raw = subprocess.check_output(
                   ['git','show','HEAD^:nicoos_bridge/inbox.json'],
@@ -49,7 +61,7 @@ jobs:
               prev = json.loads(prev_raw)
               for cmd in prev.get('commands', []):
                   cid = cmd.get('id')
-                  if cid and cid not in existing:
+                  if cid and cid not in superseded and cid not in existing:
                       inbox['commands'].append(cmd)
                       existing.add(cid)
           except Exception:
@@ -64,7 +76,7 @@ jobs:
                   continue
               for cmd in data.get('commands', []):
                   cid = cmd.get('id')
-                  if cid and cid not in existing:
+                  if cid and cid not in superseded and cid not in existing:
                       inbox['commands'].append(cmd)
                       existing.add(cid)
 
