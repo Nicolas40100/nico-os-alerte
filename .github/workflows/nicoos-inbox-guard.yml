@@ -38,12 +38,20 @@ jobs:
           inbox.setdefault('version', 2)
           inbox.setdefault('commands', [])
 
-          # These repair envelopes expired before Nico OS consumed them.
-          # They are superseded by the non-expired v3 repair envelopes.
+          # Commands below are obsolete, expired, or malformed repair envelopes.
+          # They are intentionally quarantined so Nico OS does not retry them.
           superseded = {
               'chatgpt-20260915-repair-autoecole-marle-complete-v2',
               'chatgpt-20260915-repair-leposte-v2',
               'chatgpt-20260915-repair-absence-v2',
+              'chatgpt-20260915-1006-repair-autoecole-current-complete-v3',
+              'chatgpt-20260915-1006-repair-leposte-v3',
+              'chatgpt-20260915-1006-repair-absence-v3',
+              'chatgpt-20260912-leposte-complete',
+              'chatgpt-20260912-leposte-pictanovo',
+              'chatgpt-20260912-leposte-progress85',
+              'chatgpt-20260914-absence-complete-casting-15sep',
+              'chatgpt-20260914-absence-pictanovo-15sep',
           }
           inbox['commands'] = [
               c for c in inbox['commands']
@@ -52,7 +60,7 @@ jobs:
           existing = {c.get('id') for c in inbox['commands'] if c.get('id')}
 
           # Guard direct writes: restore any command that existed in HEAD^ but
-          # disappeared from the latest inbox rewrite, except superseded IDs.
+          # disappeared from the latest inbox rewrite, except quarantined IDs.
           try:
               prev_raw = subprocess.check_output(
                   ['git','show','HEAD^:nicoos_bridge/inbox.json'],
