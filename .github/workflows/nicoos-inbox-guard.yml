@@ -1,0 +1,91 @@
+name: Nico OS inbox guard
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'nicoos_bridge/inbox.json'
+      - 'nicoos_bridge/pending/*.json'
+      - '.github/workflows/nicoos-inbox-guard.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nicoos-inbox-guard
+  cancel-in-progress: false
+
+jobs:
+  merge-and-preserve:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 2
+
+      - name: Merge pending commands and preserve previous inbox
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, subprocess
+          from pathlib import Path
+
+          inbox_path = Path('nicoos_bridge/inbox.json')
+          inbox = json.loads(inbox_path.read_text(encoding='utf-8'))
+          inbox.setdefault('version', 2)
+          inbox.setdefault('commands', [])
+          existing = {c.get('id') for c in inbox['commands'] if c.get('id')}
+
+          # Guard direct writes: restore any command that existed in HEAD^ but
+          # disappeared from the latest inbox rewrite.
+          try:
+              prev_raw = subprocess.check_output(
+                  ['git','show','HEAD^:nicoos_bridge/inbox.json'],
+                  text=True, stderr=subprocess.DEVNULL
+              )
+              prev = json.loads(prev_raw)
+              for cmd in prev.get('commands', []):
+                  cid = cmd.get('id')
+                  if cid and cid not in existing:
+                      inbox['commands'].append(cmd)
+                      existing.add(cid)
+          except Exception:
+              pass
+
+          # Merge encrypted envelopes dropped into pending/*.json.
+          pending_dir = Path('nicoos_bridge/pending')
+          for p in sorted(pending_dir.glob('*.json')) if pending_dir.exists() else []:
+              try:
+                  data = json.loads(p.read_text(encoding='utf-8'))
+              except Exception:
+                  continue
+              for cmd in data.get('commands', []):
+                  cid = cmd.get('id')
+                  if cid and cid not in existing:
+                      inbox['commands'].append(cmd)
+                      existing.add(cid)
+
+          new_text = json.dumps(inbox, ensure_ascii=False, separators=(',', ':'))
+          old_text = inbox_path.read_text(encoding='utf-8')
+          if new_text != old_text:
+              inbox_path.write_text(new_text, encoding='utf-8')
+              print('INBOX_UPDATED')
+          else:
+              print('NO_CHANGE')
+          PY
+
+      - name: Commit merged inbox
+        shell: bash
+        run: |
+          if git diff --quiet -- nicoos_bridge/inbox.json; then
+            echo 'Inbox already merged.'
+            exit 0
+          fi
+          git config user.name 'nicoos-inbox-guard'
+          git config user.email 'actions@users.noreply.github.com'
+          git add nicoos_bridge/inbox.json
+          git commit -m 'Nico OS: merge pending bridge commands'
+          git push origin main
