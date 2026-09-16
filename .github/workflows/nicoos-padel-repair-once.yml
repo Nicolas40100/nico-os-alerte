@@ -18,34 +18,81 @@ jobs:
           ref: main
           fetch-depth: 1
 
-      - name: Requeue two 16 Sep completions and 17 Sep follow-up
+      - name: Build one fresh encrypted padel repair command
         shell: bash
         run: |
+          python -m pip install --quiet cryptography
           python - <<'PY'
-          import json
+          import base64, json
           from pathlib import Path
+          from cryptography.hazmat.primitives import hashes
+          from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
-          p = Path('nicoos_bridge/inbox.json')
-          data = json.loads(p.read_text(encoding='utf-8'))
-          cmds = data.setdefault('commands', [])
-          by_id = {c.get('id'): c for c in cmds}
-          source_complete = by_id.get('chatgpt-20260916-padel-fix-stale-16')
-          source_next = by_id.get('chatgpt-20260916-padel-next-17')
-          if not source_complete or not source_next:
-              raise SystemExit('Missing padel source command(s) in inbox')
-          wanted = [
-              ('chatgpt-20260917-padel-close-16-a', source_complete),
-              ('chatgpt-20260917-padel-close-16-b', source_complete),
-              ('chatgpt-20260917-padel-create-17', source_next),
-          ]
-          existing = {c.get('id') for c in cmds}
-          for new_id, src in wanted:
-              if new_id not in existing:
-                  clone = dict(src)
-                  clone['id'] = new_id
-                  cmds.append(clone)
-                  existing.add(new_id)
-          p.write_text(json.dumps(data, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+          inbox_path = Path('nicoos_bridge/inbox.json')
+          key_path = Path('nicoos_bridge/public_key.json')
+
+          inbox = json.loads(inbox_path.read_text(encoding='utf-8'))
+          key = json.loads(key_path.read_text(encoding='utf-8'))
+
+          # Remove the superseded/broken padel repair attempts so they cannot keep retrying.
+          bad_ids = {
+              'chatgpt-20260916-padel-next-17',
+              'chatgpt-20260916-padel-fix-stale-16',
+              'chatgpt-20260917-padel-close-16-a',
+              'chatgpt-20260917-padel-close-16-b',
+              'chatgpt-20260917-padel-create-17',
+          }
+          inbox['commands'] = [c for c in inbox.get('commands', []) if c.get('id') not in bad_ids]
+
+          payload = {
+              'bridge_version': 2,
+              'expires_at': '2026-09-24T22:00:00Z',
+              'actions': [
+                  {
+                      'type': 'task_complete',
+                      'project_name': 'Balles de padel pour SPA',
+                      'selector': {'mode': 'current'}
+                  },
+                  {
+                      'type': 'task_complete',
+                      'project_name': 'Balles de padel pour SPA',
+                      'selector': {'mode': 'current'}
+                  },
+                  {
+                      'type': 'task_create',
+                      'project_name': 'Balles de padel pour SPA',
+                      'title': 'Appeler la mairie de Marle et organiser une nouvelle remise de balles dans le Laonnois',
+                      'due': '2026-09-17',
+                      'notes': "Une fois le lieu et la date confirmés, recontacter Camille Gantzer de L’Union pour le reportage."
+                  }
+              ]
+          }
+
+          raw = json.dumps(payload, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+          pub = rsa.RSAPublicNumbers(int(key['e']), int(key['n'])).public_key()
+          max_chunk = int(key.get('chunk_plaintext_max', 160))
+          chunks = []
+          for i in range(0, len(raw), max_chunk):
+              ct = pub.encrypt(
+                  raw[i:i+max_chunk],
+                  padding.OAEP(
+                      mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                      algorithm=hashes.SHA256(),
+                      label=None,
+                  ),
+              )
+              chunks.append(base64.b64encode(ct).decode('ascii'))
+
+          envelope = {
+              'id': 'chatgpt-20260917-padel-fresh-repair-v2',
+              'key_id': key['key_id'],
+              'chunks': chunks,
+          }
+          inbox.setdefault('version', 2)
+          inbox['commands'] = [c for c in inbox['commands'] if c.get('id') != envelope['id']]
+          inbox['commands'].append(envelope)
+          inbox_path.write_text(json.dumps(inbox, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+          print('Fresh padel repair queued:', envelope['id'])
           PY
 
       - name: Commit repaired queue
@@ -58,5 +105,5 @@ jobs:
             echo 'Nothing to change.'
             exit 0
           fi
-          git commit -m 'Nico OS: requeue padel duplicate cleanup and 17 Sep task'
+          git commit -m 'Nico OS: fresh encrypted padel repair for 17 Sep'
           git push origin main
