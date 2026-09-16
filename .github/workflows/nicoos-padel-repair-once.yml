@@ -1,0 +1,62 @@
+name: Nico OS padel repair once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/nicoos-padel-repair-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Requeue two 16 Sep completions and 17 Sep follow-up
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          p = Path('nicoos_bridge/inbox.json')
+          data = json.loads(p.read_text(encoding='utf-8'))
+          cmds = data.setdefault('commands', [])
+          by_id = {c.get('id'): c for c in cmds}
+          source_complete = by_id.get('chatgpt-20260916-padel-fix-stale-16')
+          source_next = by_id.get('chatgpt-20260916-padel-next-17')
+          if not source_complete or not source_next:
+              raise SystemExit('Missing padel source command(s) in inbox')
+          wanted = [
+              ('chatgpt-20260917-padel-close-16-a', source_complete),
+              ('chatgpt-20260917-padel-close-16-b', source_complete),
+              ('chatgpt-20260917-padel-create-17', source_next),
+          ]
+          existing = {c.get('id') for c in cmds}
+          for new_id, src in wanted:
+              if new_id not in existing:
+                  clone = dict(src)
+                  clone['id'] = new_id
+                  cmds.append(clone)
+                  existing.add(new_id)
+          p.write_text(json.dumps(data, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+          PY
+
+      - name: Commit repaired queue
+        shell: bash
+        run: |
+          git config user.name 'nicoos-padel-repair'
+          git config user.email 'actions@users.noreply.github.com'
+          git add nicoos_bridge/inbox.json
+          if git diff --cached --quiet; then
+            echo 'Nothing to change.'
+            exit 0
+          fi
+          git commit -m 'Nico OS: requeue padel duplicate cleanup and 17 Sep task'
+          git push origin main
