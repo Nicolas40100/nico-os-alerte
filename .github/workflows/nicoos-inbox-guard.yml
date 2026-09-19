@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     paths:
+      - 'nicoos_bridge/inbox.json'
       - 'nicoos_bridge/pending/*.json'
   workflow_dispatch:
 
@@ -15,67 +16,150 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  merge-pending-once:
+  protect-and-merge:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout latest main
         uses: actions/checkout@v4
         with:
           ref: main
-          fetch-depth: 1
+          fetch-depth: 0
 
-      - name: Validate and merge pending envelopes
+      - name: Protect append-only inbox and merge pending envelopes
         shell: bash
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
           python - <<'PY'
-          import base64, json
+          import base64, json, os, subprocess
           from pathlib import Path
 
           inbox_path = Path('nicoos_bridge/inbox.json')
-          inbox = json.loads(inbox_path.read_text(encoding='utf-8'))
-          inbox.setdefault('version', 2)
-          inbox.setdefault('commands', [])
-          existing = {c.get('id') for c in inbox['commands'] if c.get('id')}
-
           pending_dir = Path('nicoos_bridge/pending')
-          merged = []
+
+          def empty_inbox():
+              return {'version': 2, 'commands': []}
+
+          def load_json_text(text):
+              data = json.loads(text)
+              if not isinstance(data, dict):
+                  raise ValueError('root is not an object')
+              commands = data.get('commands', [])
+              if not isinstance(commands, list):
+                  raise ValueError('commands is not a list')
+              return {'version': 2, 'commands': commands}
+
+          def valid_command(cmd):
+              if not isinstance(cmd, dict):
+                  return False, 'command is not an object'
+              cid = cmd.get('id')
+              key_id = cmd.get('key_id')
+              chunks = cmd.get('chunks')
+              if not isinstance(cid, str) or not cid.strip():
+                  return False, 'missing id'
+              if not isinstance(key_id, str) or not key_id.strip():
+                  return False, f'{cid}: missing key_id'
+              if not isinstance(chunks, list) or not chunks:
+                  return False, f'{cid}: missing chunks'
+              for index, chunk in enumerate(chunks):
+                  if not isinstance(chunk, str) or not chunk:
+                      return False, f'{cid}: invalid chunk {index}'
+                  try:
+                      raw = base64.b64decode(chunk, validate=True)
+                  except Exception:
+                      return False, f'{cid}: chunk {index} is not strict base64'
+                  if len(raw) != 256:
+                      return False, f'{cid}: chunk {index} is {len(raw)} bytes, expected 256'
+              return True, ''
+
+          # Current inbox from latest main.
+          try:
+              inbox = load_json_text(inbox_path.read_text(encoding='utf-8'))
+          except Exception as exc:
+              print(f'CURRENT_INBOX_INVALID={exc}')
+              inbox = empty_inbox()
+
+          # Previous inbox from the commit before this push. This lets the guard
+          # repair a direct write that accidentally replaced the shared queue.
+          previous = empty_inbox()
+          before = (os.environ.get('BEFORE_SHA') or '').strip()
+          if before and set(before) != {'0'}:
+              proc = subprocess.run(
+                  ['git', 'show', f'{before}:nicoos_bridge/inbox.json'],
+                  capture_output=True, text=True, encoding='utf-8', errors='replace'
+              )
+              if proc.returncode == 0 and proc.stdout.strip():
+                  try:
+                      previous = load_json_text(proc.stdout)
+                  except Exception as exc:
+                      print(f'PREVIOUS_INBOX_INVALID={exc}')
+
+          clean = []
+          seen = set()
           rejected = []
 
-          for p in sorted(pending_dir.glob('*.json')) if pending_dir.exists() else []:
-              try:
-                  data = json.loads(p.read_text(encoding='utf-8'))
-                  for cmd in data.get('commands', []):
-                      cid = cmd.get('id')
-                      chunks = cmd.get('chunks')
-                      if not cid or not isinstance(chunks, list) or not chunks:
-                          raise ValueError('missing id/chunks')
-                      # Every RSA-2048 ciphertext block must be strict base64 and 256 bytes.
-                      for chunk in chunks:
-                          raw = base64.b64decode(chunk, validate=True)
-                          if len(raw) != 256:
-                              raise ValueError('invalid RSA block length')
-                      if cid not in existing:
-                          inbox['commands'].append(cmd)
-                          existing.add(cid)
-                          merged.append(cid)
-              except Exception as exc:
-                  rejected.append(f'{p.name}: {exc}')
-              finally:
-                  # pending files are one-shot: never let an old repair reappear later.
-                  try:
-                      p.unlink()
-                  except FileNotFoundError:
-                      pass
+          # Keep valid current commands first, in their existing order.
+          for cmd in inbox['commands']:
+              ok, why = valid_command(cmd)
+              if not ok:
+                  rejected.append('current: ' + why)
+                  continue
+              cid = cmd['id']
+              if cid in seen:
+                  continue
+              clean.append(cmd)
+              seen.add(cid)
 
+          # Restore any valid command that existed before but was dropped by a
+          # direct overwrite. Malformed historical commands are never restored.
+          restored = []
+          for cmd in previous['commands']:
+              ok, why = valid_command(cmd)
+              if not ok:
+                  continue
+              cid = cmd['id']
+              if cid not in seen:
+                  clean.append(cmd)
+                  seen.add(cid)
+                  restored.append(cid)
+
+          # Merge one-shot pending files. Each is consumed whether accepted or
+          # rejected so a bad repair can never reappear on later runs.
+          merged = []
+          if pending_dir.exists():
+              for p in sorted(pending_dir.glob('*.json')):
+                  try:
+                      data = load_json_text(p.read_text(encoding='utf-8'))
+                      for cmd in data['commands']:
+                          ok, why = valid_command(cmd)
+                          if not ok:
+                              raise ValueError(why)
+                          cid = cmd['id']
+                          if cid not in seen:
+                              clean.append(cmd)
+                              seen.add(cid)
+                              merged.append(cid)
+                  except Exception as exc:
+                      rejected.append(f'{p.name}: {exc}')
+                  finally:
+                      try:
+                          p.unlink()
+                      except FileNotFoundError:
+                          pass
+
+          final = {'version': 2, 'commands': clean}
           inbox_path.write_text(
-              json.dumps(inbox, ensure_ascii=False, separators=(',', ':')),
+              json.dumps(final, ensure_ascii=False, separators=(',', ':')),
               encoding='utf-8'
           )
+
+          print('RESTORED=' + ','.join(restored))
           print('MERGED=' + ','.join(merged))
           print('REJECTED=' + ' | '.join(rejected))
+          print(f'COMMAND_COUNT={len(clean)}')
           PY
 
-      - name: Commit queue update and consume pending files
+      - name: Commit protected queue
         shell: bash
         run: |
           if git diff --quiet; then
@@ -84,6 +168,6 @@ jobs:
           fi
           git config user.name 'nicoos-inbox-guard'
           git config user.email 'actions@users.noreply.github.com'
-          git add -A nicoos_bridge/inbox.json nicoos_bridge/pending
-          git commit -m 'Nico OS: merge validated pending commands'
+          git add -A nicoos_bridge
+          git commit -m 'Nico OS: guard and merge inbox safely'
           git push origin main
