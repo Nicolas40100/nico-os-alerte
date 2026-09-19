@@ -1,7 +1,7 @@
 # Nico OS GitHub Bridge V2
 
-ChatGPT writes encrypted commands to `nicoos_bridge/inbox.json`.
-Nico OS Windows polls that file about every 15 seconds and applies commands to its local SQLite database.
+ChatGPT sends encrypted commands to Nico OS Windows through GitHub.
+Nico OS polls `nicoos_bridge/inbox.json` about every 15 seconds and applies new commands to its local SQLite database.
 
 Public key: `nicoos_bridge/public_key.json`.
 Encryption: RSA-OAEP SHA-256, message split into chunks of at most 160 UTF-8 bytes before RSA encryption.
@@ -30,20 +30,59 @@ Task selectors:
 - id: `{ "mode":"id", "id":123 }`
 - title: `{ "mode":"title", "title":"Exact title" }`
 
-## CRITICAL: merge-safe inbox writes
+## Preferred ChatGPT write path: one-shot pending files
 
-`nicoos_bridge/inbox.json` is append-only from ChatGPT's point of view. Existing command envelopes MUST NOT be removed or replaced when another command is added.
+For normal ChatGPT use, DO NOT edit `nicoos_bridge/inbox.json` directly.
 
-Before every write:
+Instead:
+1. Fetch `nicoos_bridge/public_key.json` immediately before encryption.
+2. Build one payload containing all related actions that should be applied together.
+3. Use a fresh globally unique command `id`. Never reuse an old ID or old ciphertext.
+4. Set `expires_at` far enough in the future for normal PC downtime: default at least 7 days from creation, in UTC.
+5. Encrypt with the current public key and strict RSA-OAEP SHA-256 chunking.
+6. Create a NEW uniquely named file under `nicoos_bridge/pending/`, for example `pending/20260919T140000Z-<uuid>.json`.
+7. Never overwrite another pending file.
+8. The inbox guard validates the pending envelope, merges it into the shared inbox, and deletes the one-shot pending file.
+
+This pending-file path is the normal multi-tab-safe path. It allows several ChatGPT conversations to enqueue commands without writing the same GitHub file concurrently.
+
+## Task targeting safety
+
+Wrong task targeting and accidental duplicates are more damaging than a delayed update.
+
+- Prefer selector `id` when a task ID is known.
+- Otherwise prefer selector `title` when the task title is known.
+- Use selector `current` only when the user explicitly means the current task AND there is no ambiguity about multiple open tasks in that project.
+- Never use repeated `current` selectors to clean up suspected duplicates unless the user has confirmed exactly what those open tasks are.
+- For a reschedule/correction of an existing task, update or reschedule the existing task instead of creating a second copy.
+- When the user says “finish this task and create the next one”, put both actions in the SAME encrypted payload, in that order.
+- After a successful GitHub enqueue, do not immediately enqueue the same requested change again just because Nico OS has not refreshed yet. Give the local poller time to consume it first.
+- A successful GitHub write proves only that the command reached the mailbox; it does not prove the local SQLite mutation has completed.
+
+## Direct inbox writes: emergency fallback only
+
+If a direct write to `nicoos_bridge/inbox.json` is unavoidable, it is append-only from ChatGPT's point of view.
+
+Before every direct write:
 1. Fetch the latest `nicoos_bridge/inbox.json` and its current blob SHA.
 2. Parse the existing `commands` array.
-3. Append only the new envelope(s), keeping every existing envelope byte-for-byte unchanged.
+3. Append only the new envelope(s), keeping every existing envelope unchanged.
 4. Deduplicate only by exact command `id`; never drop a different existing ID.
 5. Update the file using the SHA just fetched.
 6. If GitHub reports a SHA/conflict error, fetch the newest file again, merge again, and retry. Never retry with a stale copy.
 
-A ChatGPT tab MUST NOT write a fresh `{ "version":2, "commands":[new_command] }` file that discards the existing queue. Commands intentionally remain in GitHub after local application; Nico OS tracks applied IDs locally and ignores them on later polls.
+A ChatGPT tab MUST NOT write a fresh `{ "version":2, "commands":[new_command] }` file that discards the existing queue.
 
-When several ChatGPT tabs are active, this merge rule is mandatory. A successful GitHub write only confirms that the envelope is in the mailbox; it does not by itself prove the local SQLite mutation has already happened.
+## Inbox guard invariants
+
+The GitHub Actions guard is the safety net:
+- validates strict Base64 and RSA-2048 ciphertext block length;
+- merges one-shot pending commands;
+- restores valid previously queued command IDs if a direct inbox write accidentally drops them;
+- deduplicates by exact command ID;
+- consumes pending files once;
+- rejects malformed newly submitted envelopes instead of passing them to Nico OS.
+
+Commands intentionally remain in GitHub after local application; Nico OS tracks applied IDs locally and ignores them on later polls.
 
 Do not place SQL, executable code, secrets, or arbitrary filesystem commands in the inbox.
