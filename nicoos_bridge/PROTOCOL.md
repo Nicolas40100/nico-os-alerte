@@ -52,6 +52,16 @@ This direct append path avoids the GitHub Actions merge delay while remaining mu
 
 Use a unique one-shot file under `nicoos_bridge/pending/` only when direct inbox update is unavailable or repeatedly conflicts. The inbox guard validates and merges pending files and then removes them.
 
+## Task rollover / duplicate safety
+
+For project task rollovers, do not send cleanup and creation as separate command IDs.
+
+- The local bridge title selector can see historical completed rows as well as open rows. Reused titles can therefore become ambiguous.
+- When rolling a project from old open tasks to one new next step, prefer `selector.mode = "current"` (or an exact task ID when known) for the old open tasks.
+- Put all required `task_complete` / `task_delete` actions and the single `task_create` action in ONE encrypted payload so the SQLite transaction is atomic.
+- Never issue a standalone `task_create` retry after a cleanup failure without first checking whether the new task already exists locally.
+- For LE POSTE specifically, do not create another copy of "Trouver et contacter 5 nouveaux producteurs pour LE POSTE" while one open copy already exists.
+
 ## Task targeting safety
 
 Wrong task targeting and accidental duplicates are more damaging than a delayed update.
