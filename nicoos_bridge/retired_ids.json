@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "retired_ids": [
+    "chatgpt-20260921-leposte-complete-pictanovo-stale-v1",
+    "chatgpt-20260921-leposte-complete-bilan-v1",
+    "chatgpt-20260921-leposte-new5producers-24sep-v1",
+    "chatgpt-20260921-leposte-dedupe-one-v1",
+    "chatgpt-20260921-leposte-complete-pictanovo-repair2",
+    "chatgpt-20260921-leposte-complete-bilan-repair2",
+    "chatgpt-20260921-leposte-new5producers-24sep-repair2",
+    "chatgpt-20260921-leposte-delete-two-old-current-v1"
+  ]
+}
