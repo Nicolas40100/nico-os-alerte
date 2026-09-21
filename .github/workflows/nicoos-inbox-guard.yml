@@ -6,6 +6,7 @@ on:
     paths:
       - 'nicoos_bridge/inbox.json'
       - 'nicoos_bridge/pending/*.json'
+      - 'nicoos_bridge/retired_ids.json'
   workflow_dispatch:
 
 permissions:
@@ -36,6 +37,7 @@ jobs:
 
           inbox_path = Path('nicoos_bridge/inbox.json')
           pending_dir = Path('nicoos_bridge/pending')
+          retired_path = Path('nicoos_bridge/retired_ids.json')
 
           def empty_inbox():
               return {'version': 2, 'commands': []}
@@ -72,6 +74,15 @@ jobs:
                       return False, f'{cid}: chunk {index} is {len(raw)} bytes, expected 256'
               return True, ''
 
+          retired = set()
+          if retired_path.exists():
+              try:
+                  rdata = json.loads(retired_path.read_text(encoding='utf-8'))
+                  vals = rdata.get('retired_ids', []) if isinstance(rdata, dict) else []
+                  retired = {str(x) for x in vals if str(x).strip()}
+              except Exception as exc:
+                  print(f'RETIRED_IDS_INVALID={exc}')
+
           # Current inbox from latest main.
           try:
               inbox = load_json_text(inbox_path.read_text(encoding='utf-8'))
@@ -105,6 +116,8 @@ jobs:
                   rejected.append('current: ' + why)
                   continue
               cid = cmd['id']
+              if cid in retired:
+                  continue
               if cid in seen:
                   continue
               clean.append(cmd)
@@ -118,6 +131,8 @@ jobs:
               if not ok:
                   continue
               cid = cmd['id']
+              if cid in retired:
+                  continue
               if cid not in seen:
                   clean.append(cmd)
                   seen.add(cid)
@@ -135,6 +150,8 @@ jobs:
                           if not ok:
                               raise ValueError(why)
                           cid = cmd['id']
+                          if cid in retired:
+                              continue
                           if cid not in seen:
                               clean.append(cmd)
                               seen.add(cid)
@@ -153,6 +170,7 @@ jobs:
               encoding='utf-8'
           )
 
+          print('RETIRED=' + ','.join(sorted(retired)))
           print('RESTORED=' + ','.join(restored))
           print('MERGED=' + ','.join(merged))
           print('REJECTED=' + ' | '.join(rejected))
