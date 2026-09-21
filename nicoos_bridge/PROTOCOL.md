@@ -30,21 +30,27 @@ Task selectors:
 - id: `{ "mode":"id", "id":123 }`
 - title: `{ "mode":"title", "title":"Exact title" }`
 
-## Preferred ChatGPT write path: one-shot pending files
+## Preferred ChatGPT write path: direct append for low latency
 
-For normal ChatGPT use, DO NOT edit `nicoos_bridge/inbox.json` directly.
+For normal ChatGPT use, append the encrypted command directly to `nicoos_bridge/inbox.json` so Nico OS can see it immediately on its next local poll.
 
-Instead:
+Before every direct write:
 1. Fetch `nicoos_bridge/public_key.json` immediately before encryption.
 2. Build one payload containing all related actions that should be applied together.
 3. Use a fresh globally unique command `id`. Never reuse an old ID or old ciphertext.
 4. Set `expires_at` far enough in the future for normal PC downtime: default at least 7 days from creation, in UTC.
 5. Encrypt with the current public key and strict RSA-OAEP SHA-256 chunking.
-6. Create a NEW uniquely named file under `nicoos_bridge/pending/`, for example `pending/20260919T140000Z-<uuid>.json`.
-7. Never overwrite another pending file.
-8. The inbox guard validates the pending envelope, merges it into the shared inbox, and deletes the one-shot pending file.
+6. Fetch the latest `nicoos_bridge/inbox.json` and its current blob SHA immediately before writing.
+7. Append only the new envelope, preserving every existing command.
+8. Update the inbox with the SHA just fetched.
+9. If GitHub reports a SHA/conflict error, fetch the newest inbox, merge again, and retry. Never overwrite a newer queue.
+10. Deduplicate only by exact command ID.
 
-This pending-file path is the normal multi-tab-safe path. It allows several ChatGPT conversations to enqueue commands without writing the same GitHub file concurrently.
+This direct append path avoids the GitHub Actions merge delay while remaining multi-tab safe when SHA conflict retry is respected.
+
+### Pending-file fallback
+
+Use a unique one-shot file under `nicoos_bridge/pending/` only when direct inbox update is unavailable or repeatedly conflicts. The inbox guard validates and merges pending files and then removes them.
 
 ## Task targeting safety
 
