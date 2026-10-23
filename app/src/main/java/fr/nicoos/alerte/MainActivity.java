@@ -1,8 +1,10 @@
 package fr.nicoos.alerte;
 
 import android.app.*;
+import android.app.job.*;
 import android.os.*;
 import android.content.*;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.view.*;
@@ -33,6 +35,8 @@ public class MainActivity extends Activity {
   baseUrl=prefs.getString("base_url","");
   linkKey=prefs.getString("link_key","");
   buildUi();
+  requestNotificationPermission();
+  scheduleAlertJob();
   if(baseUrl.isEmpty()||linkKey.isEmpty()) showSetup(); else {showApp();loadTask();}
  }
 
@@ -71,6 +75,8 @@ public class MainActivity extends Activity {
   nextDateButton.setOnClickListener(v->pickDate());add.setOnClickListener(v->addNext());skip.setOnClickListener(v->{followBox.setVisibility(View.GONE);loadTask();});
 
   appBox.addView(status);
+  Button testAlert=btn("🔔 TESTER L'ALERTE",SECONDARY);appBox.addView(testAlert);
+  testAlert.setOnClickListener(v->{status.setText("Test de l'alerte Android…");exec.execute(()->{try{String r=AlertJobService.checkAndNotify(getApplicationContext(),true);runOnUiThread(()->status.setText(r));}catch(Exception e){runOnUiThread(()->status.setText(clean(e)));}});});
   Button settings=btn("⚙ CONNEXION",SECONDARY);appBox.addView(settings);settings.setOnClickListener(v->showSetup());
   root.addView(appBox);
  }
@@ -89,7 +95,7 @@ public class MainActivity extends Activity {
    JSONObject h=new JSONObject(request("GET","/health",null));
    if(!h.optBoolean("ok",false))throw new Exception(h.optString("error","Connexion impossible"));
    prefs.edit().putString("base_url",baseUrl).putString("link_key",linkKey).apply();
-   runOnUiThread(()->{msg.setText("");showApp();loadTask();});
+   runOnUiThread(()->{msg.setText("");showApp();scheduleAlertJob();loadTask();});
   }catch(Exception e){runOnUiThread(()->msg.setText(clean(e)));}});
  }
 
@@ -133,6 +139,24 @@ public class MainActivity extends Activity {
  void addNext(){
   String title=nextTask.getText().toString().trim();if(title.isEmpty()){Toast.makeText(this,"Écris la prochaine tâche.",Toast.LENGTH_SHORT).show();return;}status.setText("Ajout dans Nico OS local…");
   exec.execute(()->{try{JSONObject b=new JSONObject().put("title",title).put("project_id",currentProjectId).put("priority",currentPriority).put("duration",30);if(!nextDate.isEmpty())b.put("due",nextDate);request("POST","/create",b.toString());runOnUiThread(()->{nextTask.setText("");nextDate="";nextDateButton.setText("CHOISIR LA DATE");loadTask();});}catch(Exception e){runOnUiThread(()->status.setText(clean(e)));}});
+ }
+
+ void requestNotificationPermission(){
+  if(Build.VERSION.SDK_INT>=33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)
+   requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS},1001);
+ }
+
+ void scheduleAlertJob(){
+  if(baseUrl==null||baseUrl.isEmpty()||linkKey==null||linkKey.isEmpty())return;
+  try{
+   JobScheduler js=(JobScheduler)getSystemService(JOB_SCHEDULER_SERVICE);
+   JobInfo job=new JobInfo.Builder(2301,new ComponentName(this,AlertJobService.class))
+    .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
+    .setPeriodic(15*60*1000L)
+    .setPersisted(true)
+    .build();
+   js.schedule(job);
+  }catch(Exception ignored){}
  }
 
  String clean(Exception e){String s=e.getMessage();if(s==null)return"Erreur réseau";return s.length()>240?s.substring(0,240):s;}
