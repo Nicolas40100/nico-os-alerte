@@ -48,11 +48,19 @@ def all_tasks():
     return data if isinstance(data, list) else []
 
 
+def priority_value(v):
+    try:
+        return int(v)
+    except Exception:
+        s = str(v or "").strip().lower()
+        return {"haute": 3, "élevée": 3, "elevee": 3, "moyenne": 2, "basse": 1}.get(s, 0)
+
+
 def next_task():
     open_tasks = [x for x in all_tasks() if not bool(x.get("done"))]
     def key(t):
         due = (t.get("due") or "").strip()
-        return (1 if not due else 0, due or "9999-12-31", int(t.get("id") or 0))
+        return (1 if not due else 0, due or "9999-12-31", -priority_value(t.get("priority")), int(t.get("id") or 0))
     open_tasks.sort(key=key)
     return open_tasks[0] if open_tasks else None
 
